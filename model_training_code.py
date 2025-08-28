@@ -1,4 +1,5 @@
 # tap_typing_ke_t5_train_touch_only.py
+import os
 import json
 from pathlib import Path
 from typing import Dict, Any, List
@@ -13,12 +14,13 @@ from transformers import (
     TrainingArguments,
     set_seed,
 )
+import torch
 
 # ==========================
 # 0) 경로 및 기본 설정
 # ==========================
 
-CSV_PATH ="touch_data.csv"  # 터치 데이터 CSV 파일 경로
+CSV_PATH = "touch_data.csv"  # 터치 데이터 CSV 파일 경로
 
 SAVE_DIR = Path("ckpt/ke-t5-small-touch-only")  # 모델/토크나이저/정규화 파라미터 저장 위치
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
@@ -26,6 +28,46 @@ SAVE_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
+
+# --------------------------
+# GPU/MPS 감지 & 정밀도 결정
+# --------------------------
+def get_device_and_precision():
+    use_cuda = torch.cuda.is_available()
+    use_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+
+    if use_cuda:
+        device = torch.device("cuda")
+        # cuDNN 튜닝
+        torch.backends.cudnn.benchmark = True
+        # bf16 지원(암페어 이상) 시 bf16 우선, 아니면 fp16
+        bf16_ok = torch.cuda.is_bf16_supported()
+        precision = {"bf16": bf16_ok, "fp16": (not bf16_ok)}
+    elif use_mps:
+        device = torch.device("mps")
+        precision = {"bf16": False, "fp16": False}
+    else:
+        device = torch.device("cpu")
+        precision = {"bf16": False, "fp16": False}
+
+    return device, precision, use_cuda, use_mps
+
+device, precision_kwargs, use_cuda, use_mps = get_device_and_precision()
+# 선택적: FP32 matmul 가속 (CUDA에서만 의미 있음)
+try:
+    torch.set_float32_matmul_precision("high")
+except Exception:
+    pass
+
+print(f"[Device] {device} | CUDA: {use_cuda} | MPS: {use_mps}")
+if use_cuda:
+    try:
+        name = torch.cuda.get_device_name(0)
+        cap = torch.cuda.get_device_capability(0)
+        bf16_sup = torch.cuda.is_bf16_supported()
+        print(f"[CUDA] device_name={name} | capability={cap} | bf16_supported={bf16_sup}")
+    except Exception as e:
+        print(f"[CUDA] info fetch error: {e}")
 
 # ==========================
 # 1) 터치 CSV 로드 & 전처리 (키보드 메타 불필요)
@@ -36,7 +78,10 @@ use_cols = [
     "first_frame_touch_y",
     "was_deleted",  # 없으면 무시
 ]
-df = pd.read_csv(CSV_PATH, usecols=lambda c: c in use_cols or c in ["ref_char", "first_frame_touch_x", "first_frame_touch_y"])
+df = pd.read_csv(
+    CSV_PATH,
+    usecols=lambda c: c in use_cols or c in ["ref_char", "first_frame_touch_x", "first_frame_touch_y"]
+)
 
 # 결측치 제거
 df = df.dropna(subset=["ref_char", "first_frame_touch_x", "first_frame_touch_y"]).copy()
@@ -92,6 +137,13 @@ print(raw_ds)
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 
+# (참고) Trainer가 내부에서 자동으로 모델을 디바이스로 옮기지만,
+# 명시적으로 옮겨도 무방.
+try:
+    model.to(device)
+except Exception:
+    pass
+
 # ==========================
 # 5) 토크나이즈 함수 (좌표 0..1 → 00..99 버킷)
 # ==========================
@@ -133,12 +185,15 @@ collator = DataCollatorForSeq2Seq(
     pad_to_multiple_of=8,
 )
 
+# 혼합정밀/핀메모리/옵티마이저 자동 설정
+optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
+
 args = TrainingArguments(
     output_dir=str(SAVE_DIR),              # 체크포인트도 여기에
     per_device_train_batch_size=16,
     per_device_eval_batch_size=16,
     num_train_epochs=3,
-    eval_strategy="steps",           # ← 최신 파라미터명
+    evaluation_strategy="steps",           # ← 올바른 파라미터명
     eval_steps=500,
     save_strategy="steps",
     save_steps=500,
@@ -146,6 +201,9 @@ args = TrainingArguments(
     logging_steps=50,
     eval_delay=0,
     report_to="none",                      # wandb 등 안 쓸 경우
+    dataloader_pin_memory=use_cuda,        # CUDA 아닐 땐 경고 방지
+    optim=optim_choice,
+    **precision_kwargs,                    # bf16 또는 fp16 자동 적용
 )
 
 trainer = Trainer(
