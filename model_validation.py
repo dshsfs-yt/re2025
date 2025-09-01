@@ -10,7 +10,7 @@ MODEL_DIR = Path("ckpt/ke-t5-small-touch-only")
 CSV_PATH  = "touch_data.csv"
 N         = 1000
 BATCH     = 64
-SEED      = 14456456
+SEED      = 42
 
 def load_checkpoint(model_dir: Path):
     with open(model_dir / "normalization.json", "r", encoding="utf-8") as f:
@@ -89,7 +89,7 @@ def main():
     print(f"Samples        : {n_eval}")
     print(f"Device         : {dev}")
     print(f"Batch size     : {BATCH}")
-    print(f"Accuracy@1     : {correct}/{n_eval} = {acc:.2%}")
+    print(f"Accuracy     : {correct}/{n_eval} = {acc:.2%}")
 
 if __name__ == "__main__":
     main()
