@@ -60,6 +60,7 @@ def main():
 
     use_cols = ["ref_char","first_frame_touch_x","first_frame_touch_y","was_deleted"]
     df = pd.read_csv(CSV_PATH, usecols=lambda c: c in use_cols)
+    df=df[40000:]
     df = df.dropna(subset=["ref_char","first_frame_touch_x","first_frame_touch_y"]).copy()
     if "was_deleted" in df.columns:
         # 다양한 표현을 False로 처리
