@@ -64,7 +64,9 @@ print(f"[Device] {device} | CUDA: {use_cuda}")
 #     - target: str (정답 문장)
 # ==========================
 raw_df = pd.read_csv(CSV_PATH, usecols=["pairs", "target"])
+print(f"[Data] Loaded {len(raw_df)} rows from {CSV_PATH}")
 raw_df=raw_df[:(int(len(raw_df)*0.9))] 
+
 raw_df = raw_df.dropna(subset=["pairs", "target"]).reset_index(drop=True)
 
 def _parse_pairs(js: str) -> List[Dict[str, Any]]:
