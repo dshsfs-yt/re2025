@@ -83,7 +83,7 @@ df = pd.read_csv(
     usecols=lambda c: c in use_cols or c in ["ref_char", "first_frame_touch_x", "first_frame_touch_y"]
 )
 
-df=df[:40000] 
+df=df[:(int(len(df)*0.9))] 
 
 # 결측치 제거
 df = df.dropna(subset=["ref_char", "first_frame_touch_x", "first_frame_touch_y"]).copy()

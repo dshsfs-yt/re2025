@@ -1,8 +1,13 @@
-# tap_typing_ke_t5_train_touch_only.py
-import os
+# tap_typing_ke_t5_train_pairs2sent.py
+# 입력: CSV with columns = ["pairs", "target"]
+#   - pairs: JSON string like
+#       [{"ch":"ㄱ","x":1108.0,"y":312.3}, {"ch":"ㅏ","x":1042.0,"y":298.1}, ...]
+#   - target: 정답 문장 (string)
+# 출력: ckpt/ke-t5-small-pairs2sent/ 에 모델/토크나이저/정규화 파라미터 저장
+
 import json
 from pathlib import Path
-from typing import Dict, Any, List
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 from datasets import Dataset, DatasetDict
@@ -19,165 +24,159 @@ import torch
 # ==========================
 # 0) 경로 및 기본 설정
 # ==========================
-
-CSV_PATH = "touch_data.csv"  # 터치 데이터 CSV 파일 경로
-
-SAVE_DIR = Path("ckpt/ke-t5-small-touch-only")  # 모델/토크나이저/정규화 파라미터 저장 위치
+CSV_PATH = "tap_sequences.csv"  # <-- 너의 새 데이터 파일 경로 (pairs/target 컬럼 포함 CSV)
+SAVE_DIR = Path("ckpt/ke-t5-small-pairs2sent")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
-# --------------------------
-# GPU/MPS 감지 & 정밀도 결정
-# --------------------------
+# ==========================
+# 1) 디바이스/정밀도
+# ==========================
 def get_device_and_precision():
     use_cuda = torch.cuda.is_available()
     use_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-
     if use_cuda:
         device = torch.device("cuda")
-        # cuDNN 튜닝
         torch.backends.cudnn.benchmark = True
-        # bf16 지원(암페어 이상) 시 bf16 우선, 아니면 fp16
-        bf16_ok = torch.cuda.is_bf16_supported()
-        precision = {"bf16": bf16_ok, "fp16": (not bf16_ok)}
+        precision = {"bf16": torch.cuda.is_bf16_supported(), "fp16": False}
     elif use_mps:
         device = torch.device("mps")
         precision = {"bf16": False, "fp16": False}
     else:
         device = torch.device("cpu")
         precision = {"bf16": False, "fp16": False}
+    return device, precision, use_cuda
 
-    return device, precision, use_cuda, use_mps
-
-device, precision_kwargs, use_cuda, use_mps = get_device_and_precision()
-# 선택적: FP32 matmul 가속 (CUDA에서만 의미 있음)
+device, precision_kwargs, use_cuda = get_device_and_precision()
 try:
     torch.set_float32_matmul_precision("high")
 except Exception:
     pass
+print(f"[Device] {device} | CUDA: {use_cuda}")
 
-print(f"[Device] {device} | CUDA: {use_cuda} | MPS: {use_mps}")
-if use_cuda:
+# ==========================
+# 2) 데이터 로드
+#   기대 스키마:
+#     - pairs: JSON string -> list[ { "ch": str, "x": float, "y": float } ]
+#     - target: str (정답 문장)
+# ==========================
+raw_df = pd.read_csv(CSV_PATH, usecols=["pairs", "target"])
+raw_df=raw_df[:(int(len(raw_df)*0.9))] 
+raw_df = raw_df.dropna(subset=["pairs", "target"]).reset_index(drop=True)
+
+def _parse_pairs(js: str) -> List[Dict[str, Any]]:
     try:
-        name = torch.cuda.get_device_name(0)
-        cap = torch.cuda.get_device_capability(0)
-        bf16_sup = torch.cuda.is_bf16_supported()
-        print(f"[CUDA] device_name={name} | capability={cap} | bf16_supported={bf16_sup}")
-    except Exception as e:
-        print(f"[CUDA] info fetch error: {e}")
+        arr = json.loads(js)
+        # 최소 필드 보정
+        out = []
+        for it in arr:
+            ch = str(it.get("ch", ""))
+            x = float(it.get("x", 0.0))
+            y = float(it.get("y", 0.0))
+            out.append({"ch": ch, "x": x, "y": y})
+        return out
+    except Exception:
+        return []
+
+pairs_list: List[List[Dict[str, Any]]] = [ _parse_pairs(s) for s in raw_df["pairs"].tolist() ]
+targets: List[str] = raw_df["target"].tolist()
+
+# 비어있는 샘플 제거
+filtered_pairs, filtered_targets = [], []
+for p, t in zip(pairs_list, targets):
+    if isinstance(p, list) and len(p) > 0 and isinstance(t, str) and len(t) > 0:
+        filtered_pairs.append(p)
+        filtered_targets.append(t)
+
+if len(filtered_pairs) == 0:
+    raise ValueError("유효한 샘플이 없습니다. 'pairs'(JSON)와 'target'(str) 컬럼을 확인하세요.")
 
 # ==========================
-# 1) 터치 CSV 로드 & 전처리 (키보드 메타 불필요)
+# 3) 좌표 전역 정규화 파라미터 계산
 # ==========================
-use_cols = [
-    "ref_char",
-    "first_frame_touch_x",
-    "first_frame_touch_y",
-    "was_deleted",  # 없으면 무시
-]
-df = pd.read_csv(
-    CSV_PATH,
-    usecols=lambda c: c in use_cols or c in ["ref_char", "first_frame_touch_x", "first_frame_touch_y"]
-)
+xs = [pt["x"] for seq in filtered_pairs for pt in seq]
+ys = [pt["y"] for seq in filtered_pairs for pt in seq]
+x_min, x_max = float(min(xs)), float(max(xs))
+y_min, y_max = float(min(ys)), float(max(ys))
 
-df=df[:(int(len(df)*0.9))] 
+def _clip01(v: float) -> float:
+    return max(0.0, min(1.0, float(v)))
 
-# 결측치 제거
-df = df.dropna(subset=["ref_char", "first_frame_touch_x", "first_frame_touch_y"]).copy()
-
-# 삭제된 터치 제외 (열이 있을 때만)
-if "was_deleted" in df.columns:
-    df = df[df["was_deleted"] == False].copy()
-
-# ref_char 정제: 'SPACE' -> '<SPACE>' (원하면 ' ' 로 바꿔도 됨)
-def map_ref_char(c: str) -> str:
-    c = str(c)
-    return "<SPACE>" if c == "SPACE" else c
-
-df["ref_char"] = df["ref_char"].map(map_ref_char)
-
-# ==========================
-# 2) 좌표 정규화 (CSV 자체 min/max 사용)
-# ==========================
-x_min = float(df["first_frame_touch_x"].min())
-x_max = float(df["first_frame_touch_x"].max())
-y_min = float(df["first_frame_touch_y"].min())
-y_max = float(df["first_frame_touch_y"].max())
-
-def norm01(v: float, vmin: float, vmax: float) -> float:
+def _to01(v: float, vmin: float, vmax: float) -> float:
     if vmax <= vmin:
-        return 0.5  # 안전장치
-    v = (float(v) - vmin) / (vmax - vmin)
-    return max(0.0, min(1.0, v))
+        return 0.5
+    return _clip01((float(v) - vmin) / (vmax - vmin))
 
-df["x"] = df["first_frame_touch_x"].apply(lambda v: norm01(v, x_min, x_max))
-df["y"] = df["first_frame_touch_y"].apply(lambda v: norm01(v, y_min, y_max))
+def _q99(v01: float) -> int:
+    return int(round(_clip01(v01) * 99))
 
-# 필요한 열만 유지
-df = df[["x", "y", "ref_char"]].reset_index(drop=True)
+SPACE_LABEL = "<SPACE>"  # 공백 표기 일관화(원하면 '▁' 등으로 교체 가능)
+
+def _canon_char(ch: str) -> str:
+    # 입력 글자 표준화 (예: ' ' 또는 'SPACE' 등)
+    ch = str(ch)
+    if ch == " " or ch.upper() == "SPACE":
+        return SPACE_LABEL
+    return ch[:1] if len(ch) > 0 else ""
 
 # ==========================
-# 3) HF Datasets 변환 & 스플릿
+# 4) 프롬프트 구성
+#    touchseq: <ch>@<ix,iy> ...  -> text
 # ==========================
-ds_all = Dataset.from_pandas(df, preserve_index=False).shuffle(seed=RANDOM_SEED)
-n = len(ds_all)
-split = int(n * 0.95) if n > 20 else max(1, n - 1)  # 작은 데이터 안전장치
+PROMPT_FORMAT = "touchseq: {seq} -> text"
 
+def build_src_text(seq: List[Dict[str, Any]]) -> str:
+    toks: List[str] = []
+    for pt in seq:
+        ch = _canon_char(pt["ch"])
+        ix = _q99(_to01(pt["x"], x_min, x_max))
+        iy = _q99(_to01(pt["y"], y_min, y_max))
+        toks.append(f"{ch}@{ix:02d},{iy:02d}")
+    return PROMPT_FORMAT.format(seq=" ".join(toks))
+
+src_texts: List[str] = [ build_src_text(seq) for seq in filtered_pairs ]
+tgt_texts: List[str] = filtered_targets
+
+# ==========================
+# 5) HF Datasets 변환 & 스플릿
+# ==========================
+df_for_ds = pd.DataFrame({"src": src_texts, "tgt": tgt_texts})
+all_ds = Dataset.from_pandas(df_for_ds, preserve_index=False).shuffle(seed=RANDOM_SEED)
+
+n = len(all_ds)
+split = int(n * 0.95) if n > 20 else max(1, n - 1)
 raw_ds = DatasetDict({
-    "train": ds_all.select(range(split)),
-    "validation": ds_all.select(range(split, n)),
+    "train": all_ds.select(range(split)),
+    "validation": all_ds.select(range(split, n)),
 })
-
 print(raw_ds)
 
 # ==========================
-# 4) 토크나이저/모델 로드
+# 6) 토크나이저/모델 및 토크나이즈
 # ==========================
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
-
-# (참고) Trainer가 내부에서 자동으로 모델을 디바이스로 옮기지만,
-# 명시적으로 옮겨도 무방.
 try:
     model.to(device)
 except Exception:
     pass
 
-# ==========================
-# 5) 토크나이즈 함수 (좌표 0..1 → 00..99 버킷)
-# ==========================
-def make_tokenize_function_01(max_src_len=32, max_tgt_len=8):
-    def _q99(v: float) -> int:
-        v = max(0.0, min(float(v), 1.0))
-        return int(round(v * 99))
+MAX_SRC_LEN = 512
+MAX_TGT_LEN = 256
 
-    def tokenize_function(batch: Dict[str, List[Any]]) -> Dict[str, Any]:
-        xs  = [ _q99(v) for v in batch["x"] ]
-        ys  = [ _q99(v) for v in batch["y"] ]
-        tgt = [ str(v) for v in batch["ref_char"] ]  # '<SPACE>' 또는 단일 문자
+def tokenize_function(batch: Dict[str, List[str]]) -> Dict[str, Any]:
+    enc = tokenizer(batch["src"], max_length=MAX_SRC_LEN, truncation=True)
+    lab = tokenizer(text_target=batch["tgt"], max_length=MAX_TGT_LEN, truncation=True)
+    enc["labels"] = lab["input_ids"]
+    return enc
 
-        prompts = [ f"coords: {ix:02d},{iy:02d} -> char" for ix,iy in zip(xs,ys) ]
-
-        enc = tokenizer(prompts, max_length=max_src_len, truncation=True)
-        lab = tokenizer(text_target=tgt, max_length=max_tgt_len, truncation=True)
-        enc["labels"] = lab["input_ids"]
-        return enc
-
-    return tokenize_function
-
-tokenize_function = make_tokenize_function_01(max_src_len=32, max_tgt_len=8)
-
-tokenized = raw_ds.map(
-    tokenize_function,
-    batched=True,
-    remove_columns=raw_ds["train"].column_names,
-)
+tokenized = raw_ds.map(tokenize_function, batched=True, remove_columns=raw_ds["train"].column_names)
 
 # ==========================
-# 6) Collator & TrainingArguments & Trainer
+# 7) Collator & Trainer
 # ==========================
 collator = DataCollatorForSeq2Seq(
     tokenizer=tokenizer,
@@ -187,25 +186,24 @@ collator = DataCollatorForSeq2Seq(
     pad_to_multiple_of=8,
 )
 
-# 혼합정밀/핀메모리/옵티마이저 자동 설정
 optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
 
 args = TrainingArguments(
-    output_dir=str(SAVE_DIR),              # 체크포인트도 여기에
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
+    output_dir=str(SAVE_DIR),
+    per_device_train_batch_size=8,
+    per_device_eval_batch_size=8,
     num_train_epochs=3,
-    eval_strategy="steps",           # ← 올바른 파라미터명
+    eval_strategy="steps",
     eval_steps=500,
     save_strategy="steps",
     save_steps=500,
     logging_strategy="steps",
     logging_steps=50,
     eval_delay=0,
-    report_to="none",                      # wandb 등 안 쓸 경우
-    dataloader_pin_memory=use_cuda,        # CUDA 아닐 땐 경고 방지
+    report_to="none",
+    dataloader_pin_memory=use_cuda,
     optim=optim_choice,
-    **precision_kwargs,                    # bf16 또는 fp16 자동 적용
+    **precision_kwargs,
 )
 
 trainer = Trainer(
@@ -218,24 +216,22 @@ trainer = Trainer(
 )
 
 # ==========================
-# 7) 학습
+# 8) 학습 & 저장
 # ==========================
 trainer.train()
 
-# ==========================
-# 8) 저장: 모델, 토크나이저, 정규화 파라미터
-# ==========================
 # (1) 모델/토크나이저 저장
-trainer.save_model(str(SAVE_DIR))           # 모델 가중치 + config
-tokenizer.save_pretrained(str(SAVE_DIR))    # 토크나이저
+trainer.save_model(str(SAVE_DIR))
+tokenizer.save_pretrained(str(SAVE_DIR))
 
-# (2) 정규화 파라미터 저장 (추론 시 재사용)
+# (2) 정규화 파라미터 저장
 norm_params = {
     "x_min": x_min, "x_max": x_max,
     "y_min": y_min, "y_max": y_max,
-    "quantize_to": 100,  # 0..99 버킷
-    "prompt_format": "coords: {ix:02d},{iy:02d} -> char",
-    "space_label": "<SPACE>",
+    "quantize_to": 100,
+    "prompt_format": PROMPT_FORMAT,
+    "space_label": SPACE_LABEL,
+    "input_token_pattern": "{ch}@{ix:02d},{iy:02d}",
 }
 with open(SAVE_DIR / "normalization.json", "w", encoding="utf-8") as f:
     json.dump(norm_params, f, ensure_ascii=False, indent=2)
