@@ -24,7 +24,7 @@ import torch
 # ==========================
 # 0) 경로 및 기본 설정
 # ==========================
-CSV_PATH = "tap_sequences_100.csv"  # <-- 너의 새 데이터 파일 경로 (pairs/target 컬럼 포함 CSV)
+CSV_PATH = "tap_sequences_dummy_100.csv"  # <-- 너의 새 데이터 파일 경로 (pairs/target 컬럼 포함 CSV)
 SAVE_DIR = Path("ckpt/ke-t5-small-pairs2sent")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
