@@ -15,8 +15,8 @@ from transformers import (
     AutoModelForSeq2SeqLM,
     AutoTokenizer,
     DataCollatorForSeq2Seq,
-    Trainer,
-    TrainingArguments,
+    Seq2SeqTrainer,
+    Seq2SeqTrainingArguments,
     set_seed,
 )
 import torch
@@ -24,7 +24,7 @@ import torch
 # ==========================
 # 0) 경로 및 기본 설정
 # ==========================
-CSV_PATH = "tap_sequences_dummy_100.csv"  
+CSV_PATH = "tap_sequences_dummy_100.csv"
 SAVE_DIR = Path("ckpt/ke-t5-small-pairs2sent")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -65,14 +65,12 @@ print(f"[Device] {device} | CUDA: {use_cuda}")
 # ==========================
 raw_df = pd.read_csv(CSV_PATH, usecols=["pairs", "target"])
 print(f"[Data] Loaded {len(raw_df)} rows from {CSV_PATH}")
-raw_df=raw_df[:(int(len(raw_df)*0.9))] 
-
+raw_df = raw_df[: int(len(raw_df) * 0.9)]  # 원본 코드 유지 (상위 90%만 사용)
 raw_df = raw_df.dropna(subset=["pairs", "target"]).reset_index(drop=True)
 
 def _parse_pairs(js: str) -> List[Dict[str, Any]]:
     try:
         arr = json.loads(js)
-        # 최소 필드 보정
         out = []
         for it in arr:
             ch = str(it.get("ch", ""))
@@ -83,7 +81,7 @@ def _parse_pairs(js: str) -> List[Dict[str, Any]]:
     except Exception:
         return []
 
-pairs_list: List[List[Dict[str, Any]]] = [ _parse_pairs(s) for s in raw_df["pairs"].tolist() ]
+pairs_list: List[List[Dict[str, Any]]] = [_parse_pairs(s) for s in raw_df["pairs"].tolist()]
 targets: List[str] = raw_df["target"].tolist()
 
 # 비어있는 샘플 제거
@@ -115,10 +113,9 @@ def _to01(v: float, vmin: float, vmax: float) -> float:
 def _q99(v01: float) -> int:
     return int(round(_clip01(v01) * 99))
 
-SPACE_LABEL = "<SPACE>"  # 공백 표기 일관화(원하면 '▁' 등으로 교체 가능)
+SPACE_LABEL = "<SPACE>"  # 공백 표기 일관화
 
 def _canon_char(ch: str) -> str:
-    # 입력 글자 표준화 (예: ' ' 또는 'SPACE' 등)
     ch = str(ch)
     if ch == " " or ch.upper() == "SPACE":
         return SPACE_LABEL
@@ -139,7 +136,7 @@ def build_src_text(seq: List[Dict[str, Any]]) -> str:
         toks.append(f"{ch}@{ix:02d},{iy:02d}")
     return PROMPT_FORMAT.format(seq=" ".join(toks))
 
-src_texts: List[str] = [ build_src_text(seq) for seq in filtered_pairs ]
+src_texts: List[str] = [build_src_text(seq) for seq in filtered_pairs]
 tgt_texts: List[str] = filtered_targets
 
 # ==========================
@@ -175,10 +172,14 @@ def tokenize_function(batch: Dict[str, List[str]]) -> Dict[str, Any]:
     enc["labels"] = lab["input_ids"]
     return enc
 
-tokenized = raw_ds.map(tokenize_function, batched=True, remove_columns=raw_ds["train"].column_names)
+tokenized = raw_ds.map(
+    tokenize_function,
+    batched=True,
+    remove_columns=raw_ds["train"].column_names,
+)
 
 # ==========================
-# 7) Collator & Trainer
+# 7) Collator
 # ==========================
 collator = DataCollatorForSeq2Seq(
     tokenizer=tokenizer,
@@ -188,38 +189,67 @@ collator = DataCollatorForSeq2Seq(
     pad_to_multiple_of=8,
 )
 
+# ==========================
+# 8) Metrics (생성 텍스트 기반 간단 정확도)
+# ==========================
+def _replace_ignore(label_ids, ignore_id=-100, pad_id=None):
+    if pad_id is None:
+        pad_id = tokenizer.pad_token_id
+    return [[(tok if tok != ignore_id else pad_id) for tok in seq] for seq in label_ids]
+
+def compute_metrics(eval_preds):
+    preds, labels = eval_preds
+    if isinstance(preds, tuple):
+        preds = preds[0]
+    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+    labels = _replace_ignore(labels, ignore_id=-100, pad_id=tokenizer.pad_token_id)
+    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+    decoded_preds = [p.strip() for p in decoded_preds]
+    decoded_labels = [l.strip() for l in decoded_labels]
+    exact = sum(p == l for p, l in zip(decoded_preds, decoded_labels)) / max(1, len(decoded_preds))
+    return {"exact_match": exact}
+
+# ==========================
+# 9) Seq2SeqTrainingArguments
+# ==========================
 optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
 
-args = TrainingArguments(
+args = Seq2SeqTrainingArguments(
     output_dir=str(SAVE_DIR),
     per_device_train_batch_size=8,
     per_device_eval_batch_size=8,
     num_train_epochs=3,
-    eval_strategy="steps",
+    evaluation_strategy="steps",    # ✅ 올바른 파라미터명
     eval_steps=500,
     save_strategy="steps",
     save_steps=500,
     logging_strategy="steps",
     logging_steps=50,
-    eval_delay=0,
     report_to="none",
     dataloader_pin_memory=use_cuda,
     optim=optim_choice,
+    predict_with_generate=True,          # ✅ 생성 기반 평가
+    generation_max_length=MAX_TGT_LEN,   # ✅ 출력 길이
+    generation_num_beams=4,              # ✅ 빔 서치
+    load_best_model_at_end=True,         # ✅ 베스트 체크포인트 로드
+    metric_for_best_model="exact_match", # ✅ 텍스트 지표 기준
+    greater_is_better=True,
     **precision_kwargs,
 )
 
-trainer = Trainer(
+# ==========================
+# 10) Trainer 정의 & 학습
+# ==========================
+trainer = Seq2SeqTrainer(
     model=model,
     args=args,
     train_dataset=tokenized["train"],
     eval_dataset=tokenized["validation"],
     data_collator=collator,
     tokenizer=tokenizer,
+    compute_metrics=compute_metrics,
 )
 
-# ==========================
-# 8) 학습 & 저장
-# ==========================
 trainer.train()
 
 # (1) 모델/토크나이저 저장
