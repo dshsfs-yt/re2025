@@ -25,7 +25,7 @@ import torch
 # 0) 경로 및 기본 설정
 # ==========================
 CSV_PATH = "tap_sequences_dummy_100.csv"
-SAVE_DIR = Path("ckpt/ke-t5-small-pairs2sent")
+SAVE_DIR = Path("ckpt/ke-t5-small-coord")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_NAME = "KETI-AIR/ke-t5-small"
