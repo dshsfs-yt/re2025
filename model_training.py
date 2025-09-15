@@ -1,13 +1,9 @@
-# tap_typing_ke_t5_train_pairs2sent.py
-# 입력: CSV with columns = ["pairs", "target"]
-#   - pairs: JSON string like
-#       [{"ch":"ㄱ","x":1108.0,"y":312.3}, {"ch":"ㅏ","x":1042.0,"y":298.1}, ...]
-#   - target: 정답 문장 (string)
-# 출력: ckpt/ke-t5-small-pairs2sent/ 에 모델/토크나이저/정규화 파라미터 저장
+# model_training.py — tap-logs(JSON per sentence) ➜ seq2seq(KE-T5)
+# MISS/BKSP를 입력 시퀀스에 포함하여 학습
 
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Tuple
 
 import pandas as pd
 from datasets import Dataset, DatasetDict
@@ -24,13 +20,15 @@ import torch
 # ==========================
 # 0) 경로 및 기본 설정
 # ==========================
-CSV_PATH = "tap_sequences_dummy_100.csv"
+JSON_DIR = Path("saved_logs")  # 문장별 JSON들이 들어있는 폴더
 SAVE_DIR = Path("ckpt/ke-t5-small-coord")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
+
+SPECIAL_TOKENS = ["<SPACE>", "<MISS>", "<BKSP>"]  # 추가되는 입력 토큰
 
 # ==========================
 # 1) 디바이스/정밀도
@@ -58,49 +56,11 @@ except Exception:
 print(f"[Device] {device} | CUDA: {use_cuda}")
 
 # ==========================
-# 2) 데이터 로드
-#   기대 스키마:
-#     - pairs: JSON string -> list[ { "ch": str, "x": float, "y": float } ]
-#     - target: str (정답 문장)
+# 2) JSON 폴더 로드 & 파싱
 # ==========================
-raw_df = pd.read_csv(CSV_PATH, usecols=["pairs", "target"])
-print(f"[Data] Loaded {len(raw_df)} rows from {CSV_PATH}")
-raw_df = raw_df[: int(len(raw_df) * 0.9)]  # 원본 코드 유지 (상위 90%만 사용)
-raw_df = raw_df.dropna(subset=["pairs", "target"]).reset_index(drop=True)
-
-def _parse_pairs(js: str) -> List[Dict[str, Any]]:
-    try:
-        arr = json.loads(js)
-        out = []
-        for it in arr:
-            ch = str(it.get("ch", ""))
-            x = float(it.get("x", 0.0))
-            y = float(it.get("y", 0.0))
-            out.append({"ch": ch, "x": x, "y": y})
-        return out
-    except Exception:
-        return []
-
-pairs_list: List[List[Dict[str, Any]]] = [_parse_pairs(s) for s in raw_df["pairs"].tolist()]
-targets: List[str] = raw_df["target"].tolist()
-
-# 비어있는 샘플 제거
-filtered_pairs, filtered_targets = [], []
-for p, t in zip(pairs_list, targets):
-    if isinstance(p, list) and len(p) > 0 and isinstance(t, str) and len(t) > 0:
-        filtered_pairs.append(p)
-        filtered_targets.append(t)
-
-if len(filtered_pairs) == 0:
-    raise ValueError("유효한 샘플이 없습니다. 'pairs'(JSON)와 'target'(str) 컬럼을 확인하세요.")
-
-# ==========================
-# 3) 좌표 전역 정규화 파라미터 계산
-# ==========================
-xs = [pt["x"] for seq in filtered_pairs for pt in seq]
-ys = [pt["y"] for seq in filtered_pairs for pt in seq]
-x_min, x_max = float(min(xs)), float(max(xs))
-y_min, y_max = float(min(ys)), float(max(ys))
+SPACE_LABEL = "<SPACE>"
+MISS_LABEL = "<MISS>"
+BKSP_LABEL = "<BKSP>"
 
 def _clip01(v: float) -> float:
     return max(0.0, min(1.0, float(v)))
@@ -113,34 +73,120 @@ def _to01(v: float, vmin: float, vmax: float) -> float:
 def _q99(v01: float) -> int:
     return int(round(_clip01(v01) * 99))
 
-SPACE_LABEL = "<SPACE>"  # 공백 표기 일관화
+def _canon_char_from_log(role: str, label: str) -> Tuple[bool, str]:
+    """학습 입력에 포함할지/무엇으로 넣을지 결정.
+    - CHAR: label의 첫 글자
+    - SPACE: <SPACE>
+    - MISS: <MISS>  (좌표가 있지만 글자가 안 찍힌 터치)
+    - BKSP: <BKSP>  (백스페이스 키 입력 자체를 신호로 사용)
+    """
+    role = (role or "").upper()
+    if role == "CHAR":
+        ch = (label or "")
+        return True, (ch[:1] if ch else "")
+    if role == "SPACE":
+        return True, SPACE_LABEL
+    if role == "MISS":
+        return True, MISS_LABEL
+    if role == "BKSP":
+        return True, BKSP_LABEL
+    # 기타(필요하면 확장)
+    return False, ""
 
-def _canon_char(ch: str) -> str:
-    ch = str(ch)
-    if ch == " " or ch.upper() == "SPACE":
-        return SPACE_LABEL
-    return ch[:1] if len(ch) > 0 else ""
+def _iter_json_files(json_dir: Path):
+    for p in sorted(json_dir.glob("*.json")):
+        yield p
 
-# ==========================
-# 4) 프롬프트 구성
-#    touchseq: <ch>@<ix,iy> ...  -> text
-# ==========================
+def _load_one_json(path: Path) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+# 2-1) 1차 로드: 정규화 방식 판단 및 raw 좌표 수집(백업용)
+all_items: List[Dict[str, Any]] = []
+raw_xs, raw_ys = [], []
+has_norm_xy = True  # x_norm / y_norm 가정
+
+files = list(_iter_json_files(JSON_DIR))
+if len(files) == 0:
+    raise FileNotFoundError(f"No JSON files in: {JSON_DIR.resolve()}")
+
+for fp in files:
+    obj = _load_one_json(fp)
+    tgt = obj.get("target_sentence") or ""
+    logs_blocks = obj.get("logs") or []
+    if not tgt or not logs_blocks:
+        continue
+    block0 = logs_blocks[0] or {}
+    presses = block0.get("logs") or []
+
+    for e in presses:
+        role = (e.get("role") or "").upper()
+        # 네 가지 역할 모두 좌표 확인 대상
+        if ("x_norm" not in e) or ("y_norm" not in e):
+            has_norm_xy = False
+        if "x" in e and "y" in e:
+            try:
+                raw_xs.append(float(e["x"]))
+                raw_ys.append(float(e["y"]))
+            except Exception:
+                pass
+
+    all_items.append({"tgt": tgt, "presses": presses})
+
+if not all_items:
+    raise ValueError("유효한 샘플이 없습니다. JSON 구조와 필드를 확인하세요.")
+
+if (not has_norm_xy) and (not raw_xs or not raw_ys):
+    raise ValueError("x_norm/y_norm이 없고 raw x,y도 충분치 않습니다. 입력 JSON을 확인하세요.")
+
+# 2-2) 정규화 파라미터 계산(backup: raw)
+if has_norm_xy:
+    norm_source = "x_norm"
+    x_min = 0.0; x_max = 1.0
+    y_min = 0.0; y_max = 1.0
+else:
+    norm_source = "raw"
+    x_min, x_max = float(min(raw_xs)), float(max(raw_xs))
+    y_min, y_max = float(min(raw_ys)), float(max(raw_ys))
+
+def _get_ix_iy(e: Dict[str, Any]) -> Tuple[int, int]:
+    if norm_source == "x_norm":
+        x01 = float(e.get("x_norm", 0.5))
+        y01 = float(e.get("y_norm", 0.5))
+        return _q99(x01), _q99(y01)
+    else:
+        x = float(e.get("x", 0.0))
+        y = float(e.get("y", 0.0))
+        return _q99(_to01(x, x_min, x_max)), _q99(_to01(y, y_min, y_max))
+
 PROMPT_FORMAT = "touchseq: {seq} -> text"
 
-def build_src_text(seq: List[Dict[str, Any]]) -> str:
+def build_src_from_presses(presses: List[Dict[str, Any]]) -> str:
     toks: List[str] = []
-    for pt in seq:
-        ch = _canon_char(pt["ch"])
-        ix = _q99(_to01(pt["x"], x_min, x_max))
-        iy = _q99(_to01(pt["y"], y_min, y_max))
+    for e in presses:
+        ok, ch = _canon_char_from_log(e.get("role"), e.get("label"))
+        if not ok:
+            continue
+        ix, iy = _get_ix_iy(e)
         toks.append(f"{ch}@{ix:02d},{iy:02d}")
     return PROMPT_FORMAT.format(seq=" ".join(toks))
 
-src_texts: List[str] = [build_src_text(seq) for seq in filtered_pairs]
-tgt_texts: List[str] = filtered_targets
+# 2-3) 최종 DF 생성(빈 시퀀스/빈 타깃 제거)
+src_texts, tgt_texts = [], []
+for it in all_items:
+    s = build_src_from_presses(it["presses"])
+    t = (it["tgt"] or "").strip()
+    if s.strip() and t:
+        src_texts.append(s)
+        tgt_texts.append(t)
+
+if len(src_texts) == 0:
+    raise ValueError("모든 샘플이 비었습니다. 입력 이벤트가 남는지(MISS/BKSP 포함) 확인하세요.")
+
+print(f"[Data] Loaded {len(src_texts)} samples from {JSON_DIR}")
 
 # ==========================
-# 5) HF Datasets 변환 & 스플릿
+# 3) HF Datasets 변환 & 스플릿
 # ==========================
 df_for_ds = pd.DataFrame({"src": src_texts, "tgt": tgt_texts})
 all_ds = Dataset.from_pandas(df_for_ds, preserve_index=False).shuffle(seed=RANDOM_SEED)
@@ -154,10 +200,16 @@ raw_ds = DatasetDict({
 print(raw_ds)
 
 # ==========================
-# 6) 토크나이저/모델 및 토크나이즈
+# 4) 토크나이저/모델 및 토크나이즈
 # ==========================
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+
+# 추가 특수 토큰 등록(공백/미스/백스페이스)
+added = tokenizer.add_special_tokens({"additional_special_tokens": SPECIAL_TOKENS})
+
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+if added > 0:
+    model.resize_token_embeddings(len(tokenizer))  # 임베딩 리사이즈
 try:
     model.to(device)
 except Exception:
@@ -179,7 +231,7 @@ tokenized = raw_ds.map(
 )
 
 # ==========================
-# 7) Collator
+# 5) Collator
 # ==========================
 collator = DataCollatorForSeq2Seq(
     tokenizer=tokenizer,
@@ -190,7 +242,7 @@ collator = DataCollatorForSeq2Seq(
 )
 
 # ==========================
-# 8) Metrics (생성 텍스트 기반 간단 정확도)
+# 6) Metrics (생성 텍스트 exact-match)
 # ==========================
 def _replace_ignore(label_ids, ignore_id=-100, pad_id=None):
     if pad_id is None:
@@ -210,7 +262,8 @@ def compute_metrics(eval_preds):
     return {"exact_match": exact}
 
 # ==========================
-# 9) Seq2SeqTrainingArguments
+# 7) TrainingArguments & Trainer
+#    (주의: 사용자가 요구한 eval_strategy 키 유지)
 # ==========================
 optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
 
@@ -219,7 +272,7 @@ args = Seq2SeqTrainingArguments(
     per_device_train_batch_size=8,
     per_device_eval_batch_size=8,
     num_train_epochs=3,
-    eval_strategy="steps",    
+    eval_strategy="steps",           # ← 사용자 지정(**evaluation_strategy 아님**)
     eval_steps=500,
     save_strategy="steps",
     save_steps=500,
@@ -228,18 +281,15 @@ args = Seq2SeqTrainingArguments(
     report_to="none",
     dataloader_pin_memory=use_cuda,
     optim=optim_choice,
-    predict_with_generate=True,          # ✅ 생성 기반 평가
-    generation_max_length=MAX_TGT_LEN,   # ✅ 출력 길이
-    generation_num_beams=4,              # ✅ 빔 서치
-    load_best_model_at_end=True,         # ✅ 베스트 체크포인트 로드
-    metric_for_best_model="exact_match", # ✅ 텍스트 지표 기준
+    predict_with_generate=True,
+    generation_max_length=MAX_TGT_LEN,
+    generation_num_beams=4,
+    load_best_model_at_end=True,
+    metric_for_best_model="exact_match",
     greater_is_better=True,
     **precision_kwargs,
 )
 
-# ==========================
-# 10) Trainer 정의 & 학습
-# ==========================
 trainer = Seq2SeqTrainer(
     model=model,
     args=args,
@@ -256,14 +306,20 @@ trainer.train()
 trainer.save_model(str(SAVE_DIR))
 tokenizer.save_pretrained(str(SAVE_DIR))
 
-# (2) 정규화 파라미터 저장
+# (2) 정규화/토큰 정보 저장
 norm_params = {
+    "norm_source": norm_source,      # "x_norm" 또는 "raw"
     "x_min": x_min, "x_max": x_max,
     "y_min": y_min, "y_max": y_max,
     "quantize_to": 100,
     "prompt_format": PROMPT_FORMAT,
     "space_label": SPACE_LABEL,
+    "miss_label": MISS_LABEL,
+    "bksp_label": BKSP_LABEL,
     "input_token_pattern": "{ch}@{ix:02d},{iy:02d}",
+    "roles_used": ["CHAR", "SPACE", "MISS", "BKSP"],
+    "roles_ignored": [],
+    "special_tokens": SPECIAL_TOKENS,
 }
 with open(SAVE_DIR / "normalization.json", "w", encoding="utf-8") as f:
     json.dump(norm_params, f, ensure_ascii=False, indent=2)
