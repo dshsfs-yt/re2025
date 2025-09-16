@@ -20,9 +20,9 @@ import torch
 # 0) 경로 및 기본 설정
 # ==========================
 
-CSV_PATH = "touch_data.csv"  # 터치 데이터 CSV 파일 경로
+CSV_PATH = "touch_data(korean).csv"  # 터치 데이터 CSV 파일 경로
 
-SAVE_DIR = Path("ckpt/ke-t5-small-touch-only")  # 모델/토크나이저/정규화 파라미터 저장 위치
+SAVE_DIR = Path("ckpt/ke-t5-small-touch-only(korean)")  # 모델/토크나이저/정규화 파라미터 저장 위치
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_NAME = "KETI-AIR/ke-t5-small"
