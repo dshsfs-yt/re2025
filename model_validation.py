@@ -1,4 +1,5 @@
-# eval_now.py  — 디폴트 경로로 즉시 평가 (shift 플래그 반영 + 유니코드 정규화 + 처음 5개 예시 출력)
+# eval_now.py  — 디폴트 경로로 즉시 평가
+# (shift 플래그 반영 + 유니코드 정규화 + 처음 5개 예시에 "디코딩 전" 정보까지 표시)
 import json, random, unicodedata as ud
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
@@ -60,15 +61,28 @@ def canon_pred(pred: str, space_label: str) -> str:
     return p[0] if p else ""
 
 @torch.inference_mode()
-def batch_predict(model, tok, dev: str, prompts: List[str], bs: int) -> List[str]:
-    outs: List[str] = []
+def batch_generate(model, tok, dev: str, prompts: List[str], bs: int):
+    """
+    배치로 generate 수행.
+    반환:
+      - pred_ids: List[List[int]] : 생성된 토큰 ID 시퀀스(디코딩 전)
+      - pred_text: List[str]      : skip_special_tokens=True 로 디코딩한 문자열
+      - pred_text_wsp: List[str]  : skip_special_tokens=False 로 디코딩한 문자열(스페셜 토큰 포함)
+      - pred_tokens: List[List[str]] : 토큰 문자열 시퀀스(convert_ids_to_tokens)
+    """
+    all_ids: List[List[int]] = []
     for i in range(0, len(prompts), bs):
         sl = prompts[i:i+bs]
         enc = tok(sl, return_tensors="pt", padding=True, truncation=True)
         enc = {k: v.to(dev) for k, v in enc.items()}
-        gen = model.generate(**enc, max_new_tokens=4, do_sample=False, num_beams=1)
-        outs.extend(tok.batch_decode(gen, skip_special_tokens=True))
-    return outs
+        gen_ids = model.generate(**enc, max_new_tokens=4, do_sample=False, num_beams=1)
+        # CPU로 옮겨 파이썬 리스트로 저장
+        all_ids.extend([seq.cpu().tolist() for seq in gen_ids])
+
+    pred_text      = tok.batch_decode(all_ids, skip_special_tokens=True)
+    pred_text_wsp  = tok.batch_decode(all_ids, skip_special_tokens=False)
+    pred_tokens    = [tok.convert_ids_to_tokens(ids) for ids in all_ids]
+    return all_ids, pred_text, pred_text_wsp, pred_tokens
 
 def main():
     model, tok, norm, dev = load_checkpoint(MODEL_DIR)
@@ -111,8 +125,8 @@ def main():
             "gt": gt
         })
 
-    # 예측
-    preds_raw = batch_predict(model, tok, dev, prompts, BATCH)
+    # 예측 (디코딩 전/후 모두 확보)
+    pred_ids, preds_raw, preds_with_special, pred_tokens = batch_generate(model, tok, dev, prompts, BATCH)
     preds = [canon_pred(p, space_label) for p in preds_raw]
 
     # 정확도
@@ -125,19 +139,25 @@ def main():
     print(f"Batch size  : {BATCH}")
     print(f"Accuracy    : {correct}/{n_eval} = {acc:.2%}")
 
-    # 처음 5개 입력/출력 결과 출력 (원래 정답 포함)
+    # 처음 5개 입력/출력 결과 출력 (원래 정답 + 디코딩 전 정보)
     print("\n===== First 5 Examples (input -> output) =====")
     k = min(5, n_eval)
     for i in range(k):
         ex = examples[i]
         pr_raw = preds_raw[i].strip()
+        pr_raw_wsp = preds_with_special[i].strip()
         pr = preds[i]
-        tf=  ex["gt"] == pr
+        ids = pred_ids[i]
+        toks = pred_tokens[i]
+        tf= ex["gt"] == pr
         print(
-            f"[{i+1}] prompt = {ex['prompt']} \n"
-            f"| gt_raw = '{ex['gt_raw']}' -> gt = '{ex['gt']}' \n"
-            f"| pred_raw = '{pr_raw}' -> pred = '{pr}'\n"
-            f"| correct = {tf}\n"
+            f"[{i+1}] prompt = {ex['prompt']}"
+            f"\n    gt_raw = '{ex['gt_raw']}' -> gt = '{ex['gt']}'"
+            f"\n    pred_ids = {ids}"
+            f"\n    pred_tokens = {toks}"
+            f"\n    pred_raw_wsp = '{pr_raw_wsp}'"
+            f"\n    pred_raw = '{pr_raw}' -> pred = '{pr}'"
+            f"\n    correct = {tf}"
         )
 
 if __name__ == "__main__":
