@@ -1,5 +1,5 @@
-# eval_now.py  — 디폴트 경로로 즉시 평가 (shift 플래그 반영)
-import json, random
+# eval_now.py  — 디폴트 경로로 즉시 평가 (shift 플래그 반영 + 유니코드 정규화 + 처음 5개 예시 출력)
+import json, random, unicodedata as ud
 from pathlib import Path
 from typing import Dict, Any, List, Tuple
 import pandas as pd
@@ -33,28 +33,31 @@ def quantize_xy(x_raw: float, y_raw: float, norm: Dict[str, Any]) -> Tuple[int, 
     return int(round(x01 * (qto - 1))), int(round(y01 * (qto - 1)))
 
 def build_prompt(ix: int, iy: int, s: int, fmt: str) -> str:
-    """fmt가 shift 자리표시자 {s}를 포함하면 사용, 없으면 (구형 포맷) 좌표만 적용."""
+    """fmt가 {s}를 포함하면 shift까지 채워서, 아니면 좌표만 채워서 생성."""
     try:
         return fmt.format(ix=ix, iy=iy, s=s)
     except KeyError:
         return fmt.format(ix=ix, iy=iy)
 
 def canon_label(ch: str) -> str:
-    """학습과 동일하게 <SPACE> 정규화 유지."""
+    """정답 정규화: <SPACE>는 보존, 그 외 텍스트는 NFKC 후 첫 글자."""
     s = str(ch).strip()
     if s in ("<SPACE>", "SPACE", " "):
         return "<SPACE>"
-    return s  # 단일 문자/토큰 가정, 각괄호 토큰은 그대로 유지
+    if s.startswith("<") and s.endswith(">"):
+        return s  # 기타 특수 토큰은 그대로
+    s = ud.normalize("NFKC", s)
+    return s[0] if s else ""
 
 def canon_pred(pred: str, space_label: str) -> str:
-    """모델 출력 정규화: 공백 토큰만 일관 매핑, 나머지는 가능하면 1문자로 축약하되 각괄호 토큰은 유지."""
+    """예측 정규화: 공백 토큰 매핑, 토큰 형태 보존, 일반 텍스트는 NFKC 후 첫 글자."""
     p = pred.strip()
     if p in ("<SPACE>", space_label, " "):
         return "<SPACE>"
-    # 각괄호 토큰(예: <SPACE>)은 그대로 두고, 일반 텍스트가 여러 글자면 1글자만 비교
-    if len(p) > 1 and not p.startswith("<"):
-        return p[0]
-    return p
+    if p.startswith("<") and p.endswith(">"):
+        return p
+    p = ud.normalize("NFKC", p)
+    return p[0] if p else ""
 
 @torch.inference_mode()
 def batch_predict(model, tok, dev: str, prompts: List[str], bs: int) -> List[str]:
@@ -88,16 +91,25 @@ def main():
     # 샘플링
     random.seed(SEED)
     n_eval = min(N, len(df))
-    df_s = df.sample(n=n_eval, random_state=SEED)
+    df_s = df.sample(n=n_eval, random_state=SEED).reset_index(drop=True)
 
-    # 프롬프트 생성
+    # 프롬프트/GT 생성 + 예시 보관(원래 정답 포함)
     prompts, gts = [], []
+    examples: List[Dict[str, Any]] = []
     for _, row in df_s.iterrows():
-        gt = canon_label(row["ref_char"])
+        gt_raw = str(row["ref_char"])
+        gt = canon_label(gt_raw)
         ix, iy = quantize_xy(float(row["first_frame_touch_x"]), float(row["first_frame_touch_y"]), norm)
         s = int(row.get("prev_shift", 0))
-        prompts.append(build_prompt(ix, iy, s, fmt))
+        prompt = build_prompt(ix, iy, s, fmt)
+        prompts.append(prompt)
         gts.append(gt)
+        examples.append({
+            "ix": ix, "iy": iy, "s": s,
+            "prompt": prompt,
+            "gt_raw": gt_raw,
+            "gt": gt
+        })
 
     # 예측
     preds_raw = batch_predict(model, tok, dev, prompts, BATCH)
@@ -112,6 +124,21 @@ def main():
     print(f"Device      : {dev}")
     print(f"Batch size  : {BATCH}")
     print(f"Accuracy    : {correct}/{n_eval} = {acc:.2%}")
+
+    # 처음 5개 입력/출력 결과 출력 (원래 정답 포함)
+    print("\n===== First 5 Examples (input -> output) =====")
+    k = min(5, n_eval)
+    for i in range(k):
+        ex = examples[i]
+        pr_raw = preds_raw[i].strip()
+        pr = preds[i]
+        tf=  ex["gt"] == pr
+        print(
+            f"[{i+1}] prompt = {ex['prompt']} \n"
+            f"| gt_raw = '{ex['gt_raw']}' -> gt = '{ex['gt']}' \n"
+            f"| pred_raw = '{pr_raw}' -> pred = '{pr}'\n"
+            f"| correct = {tf}\n"
+        )
 
 if __name__ == "__main__":
     main()
