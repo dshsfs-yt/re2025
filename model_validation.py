@@ -6,8 +6,8 @@ import pandas as pd
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
 
-MODEL_DIR = Path("ckpt/ke-t5-small-touch-only")
-CSV_PATH  = "touch_data.csv"
+MODEL_DIR = Path("ckpt/ke-t5-small-touch-only(korean)")
+CSV_PATH  = "touch_data(korean).csv"
 N         = 1000
 BATCH     = 64
 SEED      = 42
