@@ -168,19 +168,13 @@ def make_tokenize_function_01(max_src_len=40, max_tgt_len=8):
     def tokenize_function(batch: Dict[str, List[Any]]) -> Dict[str, Any]:
         xs  = [_q99(v) for v in batch["x"]]
         ys  = [_q99(v) for v in batch["y"]]
-        #ss  = [int(bool(s)) for s in batch["prev_shift"]]  # 0/1
-        ss=[]
-        for s in batch["prev_shift"]:
-            if s=="True":
-                ss.append(1)
-            elif s=="False":
-                ss.append(0)
+        ss  = [int(bool(s)) for s in batch["prev_shift"]]  # 0/1
         tgt = [str(v) for v in batch["ref_char"]]          # '<SPACE>' 또는 단일 문자
 
         # shift 정보를 프롬프트에 포함
         # 예: "coords: 12,83 shift:1 -> char"
         prompts = [f"coords: {ix:02d},{iy:02d} shift:{s} -> char"
-                   for ix, iy, s in zip(xs, ys, ss)]
+                    for ix, iy, s in zip(xs, ys, ss)]
 
         enc = tokenizer(prompts, max_length=max_src_len, truncation=True)
         lab = tokenizer(text_target=tgt, max_length=max_tgt_len, truncation=True)
