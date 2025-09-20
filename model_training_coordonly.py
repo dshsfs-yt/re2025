@@ -1,5 +1,3 @@
-# tap_typing_ke_t5_train_touch_only.py
-import os
 import json
 from pathlib import Path
 from typing import Dict, Any, List
@@ -28,6 +26,8 @@ SAVE_DIR.mkdir(parents=True, exist_ok=True)
 MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
+
+BATCH_SIZE = 128
 
 # --------------------------
 # GPU/MPS 감지 & 정밀도 결정
@@ -212,8 +212,8 @@ optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
 
 args = TrainingArguments(
     output_dir=str(SAVE_DIR),
-    per_device_train_batch_size=16,
-    per_device_eval_batch_size=16,
+    per_device_train_batch_size=BATCH_SIZE,
+    per_device_eval_batch_size=BATCH_SIZE,
     num_train_epochs=20,            # 에폭 증가
     eval_strategy="steps",           # 사용자가 지정한 파라미터명 유지
     eval_steps=500,
