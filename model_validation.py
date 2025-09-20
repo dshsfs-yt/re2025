@@ -65,10 +65,10 @@ def batch_generate(model, tok, dev: str, prompts: List[str], bs: int):
     """
     배치로 generate 수행.
     반환:
-      - pred_ids: List[List[int]] : 생성된 토큰 ID 시퀀스(디코딩 전)
-      - pred_text: List[str]      : skip_special_tokens=True 로 디코딩한 문자열
-      - pred_text_wsp: List[str]  : skip_special_tokens=False 로 디코딩한 문자열(스페셜 토큰 포함)
-      - pred_tokens: List[List[str]] : 토큰 문자열 시퀀스(convert_ids_to_tokens)
+    - pred_ids: List[List[int]] : 생성된 토큰 ID 시퀀스(디코딩 전)
+    - pred_text: List[str]      : skip_special_tokens=True 로 디코딩한 문자열
+    - pred_text_wsp: List[str]  : skip_special_tokens=False 로 디코딩한 문자열(스페셜 토큰 포함)
+    - pred_tokens: List[List[str]] : 토큰 문자열 시퀀스(convert_ids_to_tokens)
     """
     all_ids: List[List[int]] = []
     for i in range(0, len(prompts), bs):
