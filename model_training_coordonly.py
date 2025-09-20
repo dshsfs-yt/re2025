@@ -28,7 +28,7 @@ RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
 BATCH_SIZE = 512
-
+EPOCHS = 2000
 # --------------------------
 # GPU/MPS 감지 & 정밀도 결정
 # --------------------------
@@ -213,11 +213,11 @@ args = TrainingArguments(
     output_dir=str(SAVE_DIR),
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
-    num_train_epochs=20,            # 에폭 증가
+    num_train_epochs=EPOCHS,            # 에폭 증가
     eval_strategy="steps",           # 사용자가 지정한 파라미터명 유지
-    eval_steps=500,
+    eval_steps=10000,
     save_strategy="steps",
-    save_steps=500,
+    save_steps=10000,
     logging_strategy="steps",
     logging_steps=50,
     eval_delay=0,
