@@ -27,7 +27,7 @@ MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
-BATCH_SIZE = 128
+BATCH_SIZE = 512
 
 # --------------------------
 # GPU/MPS 감지 & 정밀도 결정
