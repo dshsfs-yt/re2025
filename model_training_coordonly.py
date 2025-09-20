@@ -140,8 +140,9 @@ model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 # 4.5) 토큰 추가
 # ==========================
 
-new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ", "ㅂ", "ㄲ"]
-special_tokens = {"additional_special_tokens": ["[SPACE]","[BKSP]"]}
+
+new_tokens = ['ㅂ', 'ㅈ', 'ㄷ', 'ㄱ', 'ㅅ', 'ㅛ', 'ㅕ', 'ㅑ', 'ㅐ', 'ㅔ', 'ㅁ', 'ㄴ', 'ㅇ', 'ㄹ', 'ㅎ', 'ㅗ', 'ㅓ', 'ㅏ', 'ㅣ', 'ㅋ', 'ㅌ', 'ㅊ', 'ㅍ', 'ㅠ', 'ㅜ', 'ㅡ', 'ㅃ', 'ㅉ', 'ㄸ', 'ㄲ', 'ㅆ', 'ㅒ', 'ㅖ']
+special_tokens = {"additional_special_tokens": ["[SPACE]","[BKSP]","[MISS]"]}
 
 num_added=tokenizer.add_tokens(new_tokens)
 num_added += tokenizer.add_special_tokens(special_tokens)
