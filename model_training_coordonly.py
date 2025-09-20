@@ -149,6 +149,11 @@ num_added += tokenizer.add_special_tokens(special_tokens)
 
 print(f"[Tokenizer] Added {num_added} tokens.")
 
+# 모델 임베딩 길이 조절
+old, new = model.get_input_embeddings().weight.size(0), len(tokenizer)
+if old != new:
+    print(f"[fix] resize_token_embeddings: {old} -> {new}")
+    model.resize_token_embeddings(new)
 
 
 
