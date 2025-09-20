@@ -136,6 +136,22 @@ print(raw_ds)
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 
+# ==========================
+# 4.5) 토큰 추가
+# ==========================
+
+new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ", "ㅂ", "ㄲ"]
+special_tokens = {"additional_special_tokens": ["[SPACE]","[BKSP]"]}
+
+num_added=tokenizer.add_tokens(new_tokens)
+num_added += tokenizer.add_special_tokens(special_tokens)
+
+print(f"[Tokenizer] Added {num_added} tokens.")
+
+
+
+
+
 try:
     model.to(device)
 except Exception:
