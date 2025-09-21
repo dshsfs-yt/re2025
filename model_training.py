@@ -31,7 +31,7 @@ set_seed(RANDOM_SEED)
 BATCH_SIZE = 64  # per device
 EPOCHS     = 10000
 RUN_NAME  = "ke-t5-small-RnE2025_1"
-STEPS=1000
+STEPS=5000
 
 os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
 os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
