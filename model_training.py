@@ -29,7 +29,7 @@ RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
 BATCH_SIZE = 64  # per device
-EPOCHS     = 30000
+EPOCHS     = 10000
 RUN_NAME  = "ke-t5-small-RnE2025_1"
 
 
