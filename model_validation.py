@@ -85,6 +85,8 @@ def main():
 
     use_cols = {"ref_char", "first_frame_touch_x", "first_frame_touch_y", "prev_shift"}
     df = pd.read_csv(CSV_PATH, usecols=lambda c: c in use_cols)
+    # 데이터의 90%만 사용 (기존 코드 유지)
+    df = df[int(len(df) * 0.9):]
     df = df.dropna(subset=["ref_char", "first_frame_touch_x", "first_frame_touch_y"]).copy()
 
     if "prev_shift" not in df.columns:
