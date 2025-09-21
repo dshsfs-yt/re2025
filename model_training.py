@@ -59,9 +59,9 @@ print(f"[Device] {device} | CUDA: {use_cuda}")
 # ==========================
 # 2) JSON 폴더 로드 & 파싱
 # ==========================
-SPACE_LABEL = "<SPACE>"
-MISS_LABEL = "<MISS>"
-BKSP_LABEL = "<BKSP>"
+SPACE_LABEL = "[SPACE]"
+MISS_LABEL = "[MISS]"
+BKSP_LABEL = "[BKSP]"
 
 def _clip01(v: float) -> float:
     return max(0.0, min(1.0, float(v)))
@@ -77,9 +77,9 @@ def _q99(v01: float) -> int:
 def _canon_char_from_log(role: str, label: str) -> Tuple[bool, str]:
     """학습 입력에 포함할지/무엇으로 넣을지 결정.
     - CHAR: label의 첫 글자
-    - SPACE: <SPACE>
-    - MISS: <MISS>  (좌표가 있지만 글자가 안 찍힌 터치)
-    - BKSP: <BKSP>  (백스페이스 키 입력 자체를 신호로 사용)
+    - SPACE: [SPACE]
+    - MISS: [MISS]  (좌표가 있지만 글자가 안 찍힌 터치)
+    - BKSP: [BKSP]  (백스페이스 키 입력 자체를 신호로 사용)
     """
     role = (role or "").upper()
     if role == "CHAR":
