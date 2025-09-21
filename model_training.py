@@ -321,6 +321,8 @@ args = Seq2SeqTrainingArguments(
     run_name=RUN_NAME,
     dataloader_pin_memory=use_cuda,
     optim=optim_choice,
+    predict_with_generate=True,
+    generation_max_length=MAX_TGT_LEN,
     generation_num_beams=4,
     **precision_kwargs,
 )
