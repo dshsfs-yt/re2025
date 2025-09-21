@@ -2,9 +2,27 @@
 import json
 from pathlib import Path
 import matplotlib.pyplot as plt
+import tkinter as tk
+from tkinter import filedialog
+
+
+def pick_file() -> Path | None:
+    root = tk.Tk()
+    root.withdraw()  # 루트 창 숨기기
+    file_path = filedialog.askopenfilename(
+        #title="파일 선택",
+        initialdir=".",  
+        filetypes=[("JSON 파일", "*.json")]
+    )
+    root.destroy()
+    if not file_path:  # 취소한 경우
+        return None
+    return Path(file_path)
+
+
 
 # ▶ 이 상대경로는 "이 파일이 있는 폴더" 기준입니다.
-REL_JSON = Path("ckpt")/"ke-t5-small-touch-only(korean)" /"checkpoint-2676" /"trainer_state.json"
+REL_JSON = pick_file()
 
 def main():
     base_dir = Path(__file__).resolve().parent
