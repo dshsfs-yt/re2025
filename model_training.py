@@ -291,6 +291,15 @@ def compute_metrics(eval_preds):
 # ==========================
 optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
 
+'''
+일단 임의로 인자 제거함
+predict_with_generate=True,
+    generation_max_length=MAX_TGT_LEN,
+load_best_model_at_end=True,
+    metric_for_best_model="exact_match",
+    greater_is_better=True,
+'''
+
 args = Seq2SeqTrainingArguments(
     output_dir=str(SAVE_DIR),
     per_device_train_batch_size=BATCH_SIZE,
@@ -305,12 +314,7 @@ args = Seq2SeqTrainingArguments(
     report_to="none",
     dataloader_pin_memory=use_cuda,
     optim=optim_choice,
-    predict_with_generate=True,
-    generation_max_length=MAX_TGT_LEN,
     generation_num_beams=4,
-    load_best_model_at_end=True,
-    metric_for_best_model="exact_match",
-    greater_is_better=True,
     **precision_kwargs,
 )
 
