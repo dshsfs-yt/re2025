@@ -1,6 +1,6 @@
 # model_training.py — tap-logs(JSON per sentence) ➜ seq2seq(KE-T5)
-# MISS/BKSP를 입력 시퀀스에 포함하여 학습
-
+import wandb
+import os
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
@@ -28,8 +28,14 @@ MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
-BATCH_SIZE = 16  # per device
-EPOCHS     = 3
+BATCH_SIZE = 64  # per device
+EPOCHS     = 30000
+RUN_NAME  = "ke-t5-small-RnE2025_1"
+
+
+os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
+os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
+os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
 
 # ==========================
 # 1) 디바이스/정밀도
@@ -305,13 +311,14 @@ args = Seq2SeqTrainingArguments(
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
     num_train_epochs=EPOCHS,
-    eval_strategy="steps",           # ← 사용자 지정(**evaluation_strategy 아님**)
-    eval_steps=500,
+    eval_strategy="steps",           
+    eval_steps=10000,
     save_strategy="steps",
-    save_steps=500,
+    save_steps=10000,
     logging_strategy="steps",
-    logging_steps=50,
-    report_to="none",
+    logging_steps=5000,
+    report_to="wandb",
+    run_name=RUN_NAME,
     dataloader_pin_memory=use_cuda,
     optim=optim_choice,
     generation_num_beams=4,

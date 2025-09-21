@@ -6,3 +6,5 @@ saved_logs
 realtmp.py
 tokenized_samples.csv
 checkpoints
+wandb_api_key.txt
+wandb
