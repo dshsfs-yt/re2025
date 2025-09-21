@@ -28,7 +28,8 @@ MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
-SPECIAL_TOKENS = ["<SPACE>", "<MISS>", "<BKSP>"]  # 추가되는 입력 토큰
+BATCH_SIZE = 16  # per device
+EPOCHS     = 3
 
 # ==========================
 # 1) 디바이스/정밀도
@@ -204,12 +205,30 @@ print(raw_ds)
 # ==========================
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
 
-# 추가 특수 토큰 등록(공백/미스/백스페이스)
-added = tokenizer.add_special_tokens({"additional_special_tokens": SPECIAL_TOKENS})
+
 
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
-if added > 0:
-    model.resize_token_embeddings(len(tokenizer))  # 임베딩 리사이즈
+
+
+# ==========================
+# 4.5) 토큰 추가
+# ==========================
+
+
+new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ", "ㅂ", "ㄲ","ㄱ","ㄴ","ㄷ","ㄹ","ㅅ","ㅇ","ㅋ","ㅎ","ㅜ","ㅠ","ㅡ","[SPACE]","[BKSP]","[MISS]"]
+
+num_added=tokenizer.add_tokens(new_tokens)
+
+
+print(f"[Tokenizer] Added {num_added} tokens.")
+
+# 모델 임베딩 길이 조절
+old, new = model.get_input_embeddings().weight.size(0), len(tokenizer)
+if old != new:
+    print(f"[fix] resize_token_embeddings: {old} -> {new}")
+    model.resize_token_embeddings(new)
+
+
 try:
     model.to(device)
 except Exception:
@@ -229,6 +248,11 @@ tokenized = raw_ds.map(
     batched=True,
     remove_columns=raw_ds["train"].column_names,
 )
+
+
+
+
+
 
 # ==========================
 # 5) Collator
@@ -269,9 +293,9 @@ optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
 
 args = Seq2SeqTrainingArguments(
     output_dir=str(SAVE_DIR),
-    per_device_train_batch_size=8,
-    per_device_eval_batch_size=8,
-    num_train_epochs=3,
+    per_device_train_batch_size=BATCH_SIZE,
+    per_device_eval_batch_size=BATCH_SIZE,
+    num_train_epochs=EPOCHS,
     eval_strategy="steps",           # ← 사용자 지정(**evaluation_strategy 아님**)
     eval_steps=500,
     save_strategy="steps",
@@ -319,7 +343,6 @@ norm_params = {
     "input_token_pattern": "{ch}@{ix:02d},{iy:02d}",
     "roles_used": ["CHAR", "SPACE", "MISS", "BKSP"],
     "roles_ignored": [],
-    "special_tokens": SPECIAL_TOKENS,
 }
 with open(SAVE_DIR / "normalization.json", "w", encoding="utf-8") as f:
     json.dump(norm_params, f, ensure_ascii=False, indent=2)
