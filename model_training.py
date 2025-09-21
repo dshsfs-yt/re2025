@@ -21,7 +21,7 @@ import torch
 # 0) 경로 및 기본 설정
 # ==========================
 JSON_DIR = Path("saved_logs")  # 문장별 JSON들이 들어있는 폴더
-SAVE_DIR = Path("ckpt/ke-t5-small-coord")
+SAVE_DIR = Path("ckpt/ke-t5-small-RnE2025")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_NAME = "KETI-AIR/ke-t5-small"
