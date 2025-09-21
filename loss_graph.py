@@ -11,7 +11,7 @@ def pick_file() -> Path | None:
     root.withdraw()  # 루트 창 숨기기
     file_path = filedialog.askopenfilename(
         #title="파일 선택",
-        initialdir=".",  
+        initialdir="ckpt",  
         filetypes=[("JSON 파일", "*.json")]
     )
     root.destroy()
