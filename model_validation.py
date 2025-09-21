@@ -140,9 +140,7 @@ def main():
         print(
             f"[{i+1}] prompt = {ex['prompt']}"
             f"\n    gt_raw = {repr(ex['gt_raw'])}"
-            f"\n    pred_ids = {ids}"
             f"\n    pred_tokens = {toks}"
-            f"\n    pred_raw_wsp = {repr(pr_raw_wsp)}"
             f"\n    pred_raw = {repr(pr_raw)}"
             f"\n    correct = {tf}"
         )
