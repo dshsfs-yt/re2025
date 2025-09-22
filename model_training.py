@@ -324,6 +324,7 @@ args = Seq2SeqTrainingArguments(
     predict_with_generate=True,
     generation_max_length=MAX_TGT_LEN,
     generation_num_beams=4,
+    save_total_limit=1,
     **precision_kwargs,
 )
 
