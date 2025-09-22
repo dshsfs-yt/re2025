@@ -9,3 +9,5 @@ checkpoints
 wandb_api_key.txt
 wandb
 coordonly/checkpoints
+coordonly/touch_data.csv
+coordonly/touch_data(korean).csv
