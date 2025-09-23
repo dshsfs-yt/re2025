@@ -297,10 +297,9 @@ def compute_metrics(eval_preds):
 # ==========================
 optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
 
+
 '''
 일단 임의로 인자 제거함
-predict_with_generate=True,
-    generation_max_length=MAX_TGT_LEN,
 load_best_model_at_end=True,
     metric_for_best_model="exact_match",
     greater_is_better=True,
