@@ -190,7 +190,7 @@ for it in all_items:
 if len(src_texts) == 0:
     raise ValueError("모든 샘플이 비었습니다. 입력 이벤트가 남는지(MISS/BKSP 포함) 확인하세요.")
 
-print(f"[Data] Loaded {len(src_texts)} samples from {JSON_DIR}")
+print(f"\n[Data] Loaded {len(src_texts)} samples from {JSON_DIR}")
 
 # ==========================
 # 3) HF Datasets 변환 & 스플릿
@@ -226,12 +226,12 @@ new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "�
 num_added=tokenizer.add_tokens(new_tokens)
 
 
-print(f"[Tokenizer] Added {num_added} tokens.")
+print(f"\n[Tokenizer] Added {num_added} tokens.")
 
 # 모델 임베딩 길이 조절
 old, new = model.get_input_embeddings().weight.size(0), len(tokenizer)
 if old != new:
-    print(f"[fix] resize_token_embeddings: {old} -> {new}")
+    print(f"\n[fix] resize_token_embeddings: {old} -> {new}")
     model.resize_token_embeddings(new)
 
 
@@ -316,7 +316,7 @@ args = Seq2SeqTrainingArguments(
     save_strategy="steps",
     save_steps=STEPS,
     logging_strategy="steps",
-    logging_steps=500,
+    logging_steps=100,
     report_to="wandb",
     run_name=RUN_NAME,
     dataloader_pin_memory=use_cuda,
@@ -334,7 +334,7 @@ trainer = Seq2SeqTrainer(
     train_dataset=tokenized["train"],
     eval_dataset=tokenized["validation"],
     data_collator=collator,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     compute_metrics=compute_metrics,
 )
 
