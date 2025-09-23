@@ -293,7 +293,6 @@ def compute_metrics(eval_preds):
 
 # ==========================
 # 7) TrainingArguments & Trainer
-#    (주의: 사용자가 요구한 eval_strategy 키 유지)
 # ==========================
 optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
 
