@@ -1,37 +1,47 @@
-# model_validation.py — tap-logs(JSON per sentence) ➜ 평가(KE-T5)
-# 산출: EM 정확도, EM@K 정확도, 평균 WER/CER + 샘플별 상세 지표
-import argparse, json, random, unicodedata as ud
+# tmp_eos_beam.py — EOS까지 생성 + Beam Search 후보 출력 통합판
+# 산출: EM, EM@K, 평균 WER/CER + 샘플별 Top-K 후보
+import argparse, json, random, unicodedata as ud, time
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer
+from transformers import StoppingCriteria, StoppingCriteriaList
 
 # ==========================
-# 0) 기본 상수(필요시 여기만 바꾸면 됨)
+# 0) 기본 상수
 # ==========================
-JSON_DIR_DEFAULT  = "saved_logs"               # 문장 단위 JSON 로그 폴더
-MODEL_DIR_DEFAULT = "ckpt/ke-t5-small-RnE2025" # 학습이 저장한 체크포인트 디렉터리
+JSON_DIR_DEFAULT  = "saved_logs"
+MODEL_DIR_DEFAULT = "ckpt/ke-t5-small-RnE2025"
 MAX_SRC_LEN = 512
-MAX_TGT_LEN = 256
+MAX_TGT_LEN = 256   # (디코드 상한은 사용하지 않지만 유지)
+SAMPLE_SIZE_DEFAULT = 200
+SHOW_COUNT_DEFAULT  = 5
+TOPK_DEFAULT        = 5
+BATCH_INFER_DEFAULT = 32
+SEED_DEFAULT        = 425
 
-SAMPLE_SIZE_DEFAULT = 200   # 평가에 사용할 샘플 개수(상수)
-SHOW_COUNT_DEFAULT  = 5    # 상세 출력할 샘플 개수(상수)
-TOPK_DEFAULT        = 5     # EM@K의 K(상수)
-BATCH_INFER_DEFAULT = 32    # 추론 배치 크기
-SEED_DEFAULT        = 4213    # 랜덤 시드
-
-# 학습 시 사용한 라벨/프롬프트 포맷(학습 스크립트와 동일해야 함)
 SPACE_LABEL = "[SPACE]"
 MISS_LABEL  = "[MISS]"
 BKSP_LABEL  = "[BKSP]"
 PROMPT_FORMAT = "touchseq: {seq} -> text"
 
 # ==========================
-# 1) 디바이스/시드 유틸
+# EOS 정지 기준: 배치 내 모든 시퀀스가 EOS를 한 번 이상 생성하면 중단
+# ==========================
+class EosBatchStop(StoppingCriteria):
+    def __init__(self, eos_id: int):
+        self.eos_id = eos_id
+    def __call__(self, input_ids, scores, **kwargs) -> bool:
+        if self.eos_id is None:
+            return False
+        hit = (input_ids == self.eos_id).any(dim=1)
+        return bool(hit.all().item())
+
+# ==========================
+# 1) 디바이스/시드
 # ==========================
 def get_device():
-    """CUDA/MPS가 있으면 사용, 없으면 CPU."""
     if torch.cuda.is_available():
         torch.backends.cudnn.benchmark = True
         return torch.device("cuda")
@@ -40,37 +50,26 @@ def get_device():
     return torch.device("cpu")
 
 def set_seed(seed: int):
-    """파이썬/토치 시드 고정."""
     random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
 # ==========================
-# 2) JSON 파싱/프롬프트 구성
+# 2) JSON 파싱/프롬프트 구성(두 파일과 동일한 규칙)
 # ==========================
 def _clip01(v: float) -> float:
     return max(0.0, min(1.0, float(v)))
 
 def _to01(v: float, vmin: float, vmax: float) -> float:
-    """raw 좌표를 0~1로 정규화."""
     if vmax <= vmin:
         return 0.5
     return _clip01((float(v) - vmin) / (vmax - vmin))
 
 def _q99(v01: float) -> int:
-    """0~1 값을 00~99 버킷으로 양자화."""
     return int(round(_clip01(v01) * 99))
 
 def _canon_char_from_log(role: str, label: str) -> Tuple[bool, str]:
-    """
-    로그 이벤트를 학습 입력에 포함할지/무엇으로 넣을지 결정.
-    - CHAR : label의 첫 글자 사용
-    - SPACE: [SPACE]
-    - MISS : [MISS]  (좌표 있음, 글자 미입력)
-    - BKSP : [BKSP]
-    기타/누락은 제외
-    """
     role = (role or "").upper()
     if role == "CHAR":
         ch = (label or "")
@@ -84,12 +83,10 @@ def _canon_char_from_log(role: str, label: str) -> Tuple[bool, str]:
     return False, ""
 
 def _iter_json_files(json_dir: Path):
-    """폴더의 *.json 파일을 정렬된 순서로 순회."""
     for p in sorted(json_dir.glob("*.json")):
         yield p
 
 def _load_one_json(path: Path) -> Dict[str, Any]:
-    """한 개 JSON 파일 로드."""
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -97,10 +94,6 @@ def _load_one_json(path: Path) -> Dict[str, Any]:
 # 3) 정규화 파라미터 로드/추정
 # ==========================
 def load_norm_params(model_dir: Path):
-    """
-    학습 시 저장된 normalization.json 읽기.
-    존재하지 않으면 None 반환(→ 데이터 기반 추정).
-    """
     norm_path = model_dir / "normalization.json"
     if norm_path.exists():
         with open(norm_path, "r", encoding="utf-8") as f:
@@ -115,11 +108,6 @@ def load_norm_params(model_dir: Path):
     return None
 
 def infer_norm_from_data(items: List[Dict[str, Any]]):
-    """
-    normalization.json이 없을 때 데이터에서 정규화 설정을 추정.
-    - x_norm/y_norm 존재하면 그대로 사용
-    - 없으면 raw x,y의 최소/최대를 이용해 정규화 범위 추정
-    """
     has_norm = True
     raw_x, raw_y = [], []
     for it in items:
@@ -138,14 +126,11 @@ def infer_norm_from_data(items: List[Dict[str, Any]]):
         raise ValueError("정규화 파라미터를 추정할 수 없습니다. (x_norm 없음, raw x/y 부족)")
     return {
         "norm_source": "raw",
-        "x_min": float(min(raw_x)),
-        "x_max": float(max(raw_x)),
-        "y_min": float(min(raw_y)),
-        "y_max": float(max(raw_y)),
+        "x_min": float(min(raw_x)), "x_max": float(max(raw_x)),
+        "y_min": float(min(raw_y)), "y_max": float(max(raw_y)),
     }
 
 def make_ix_iy_getter(norm: Dict[str, float]):
-    """이벤트 → (ix, iy) 버킷 변환 함수를 생성."""
     src = norm["norm_source"]
     x_min, x_max = norm["x_min"], norm["x_max"]
     y_min, y_max = norm["y_min"], norm["y_max"]
@@ -160,11 +145,6 @@ def make_ix_iy_getter(norm: Dict[str, float]):
     return _get_ix_iy
 
 def build_src_from_presses(presses: List[Dict[str, Any]], get_ix_iy) -> str:
-    """
-    터치 이벤트 시퀀스를 학습 프롬프트 문자열로 변환.
-    각 이벤트 → "문자@ix,iy" 조합을 공백으로 이어붙인 후
-    PROMPT_FORMAT에 삽입.
-    """
     toks: List[str] = []
     for e in presses:
         ok, ch = _canon_char_from_log(e.get("role"), e.get("label"))
@@ -175,10 +155,6 @@ def build_src_from_presses(presses: List[Dict[str, Any]], get_ix_iy) -> str:
     return PROMPT_FORMAT.format(seq=" ".join(toks))
 
 def load_dataset(json_dir: Path) -> List[Dict[str, str]]:
-    """
-    saved_logs/ 폴더에서 학습과 동일한 구조로 데이터 적재.
-    반환: {'src': str, 'tgt': str, 'file': str} 리스트(원본 파일명 포함)
-    """
     items_raw: List[Dict[str, Any]] = []
     for fp in _iter_json_files(json_dir):
         obj = _load_one_json(fp)
@@ -186,7 +162,6 @@ def load_dataset(json_dir: Path) -> List[Dict[str, str]]:
         blocks = obj.get("logs") or []
         if not tgt or not blocks:
             continue
-        # 문장별 JSON에서 첫 세션의 이벤트만 사용(학습 스크립트와 동일)
         block0 = blocks[0] or {}
         presses = block0.get("logs") or []
         items_raw.append({"tgt": tgt, "presses": presses, "file": str(fp.name)})
@@ -195,93 +170,92 @@ def load_dataset(json_dir: Path) -> List[Dict[str, str]]:
     return items_raw
 
 # ==========================
-# 4) 텍스트 정규화 & 거리(Levenshtein)
+# 4) 텍스트 정규화 & 거리
 # ==========================
 def norm_text(s: str) -> str:
-    """NFC 정규화 + 좌우 공백 제거."""
     return ud.normalize("NFC", (s or "").strip())
 
 def levenshtein(seq_a, seq_b) -> int:
-    """삽입/삭제/치환 비용 1의 Levenshtein 거리."""
     la, lb = len(seq_a), len(seq_b)
     if la == 0: return lb
     if lb == 0: return la
     dp = list(range(lb + 1))
     for i in range(1, la + 1):
-        prev = dp[0]
-        dp[0] = i
+        prev = dp[0]; dp[0] = i
         for j in range(1, lb + 1):
             tmp = dp[j]
             cost = 0 if seq_a[i-1] == seq_b[j-1] else 1
-            dp[j] = min(
-                dp[j] + 1,        # 삭제
-                dp[j-1] + 1,      # 삽입
-                prev + cost       # 치환
-            )
+            dp[j] = min(dp[j] + 1, dp[j-1] + 1, prev + cost)
             prev = tmp
     return dp[lb]
 
 def wer(ref: str, hyp: str) -> float:
-    """단어 단위 WER(평균 길이 0 방지)."""
     ref = norm_text(ref); hyp = norm_text(hyp)
-    ref_toks = ref.split()
-    hyp_toks = hyp.split()
-    denom = max(1, len(ref_toks))
-    return levenshtein(ref_toks, hyp_toks) / denom
+    rt, ht = ref.split(), hyp.split()
+    return levenshtein(rt, ht) / max(1, len(rt))
 
 def cer(ref: str, hyp: str) -> float:
-    """문자 단위 CER(평균 길이 0 방지)."""
     ref = norm_text(ref); hyp = norm_text(hyp)
-    denom = max(1, len(ref))
-    return levenshtein(list(ref), list(hyp)) / denom
+    return levenshtein(list(ref), list(hyp)) / max(1, len(ref))
 
 # ==========================
-# 5) 배치 생성(Top-K 후보 포함)
+# 5) EOS까지 생성 + Top-K 후보
 # ==========================
 @torch.no_grad()
-def generate_topk(model, tokenizer, device, inputs: List[str], topk: int, beams: int, batch_size: int):
+def generate_topk_until_eos(model, tokenizer, device, inputs: List[str], topk: int, beams: int, batch_size: int):
     """
-    num_beams ≥ topk로 설정하여 상위 K개 후보를 생성.
+    - num_beams ≥ topk
+    - EOS가 모든 시퀀스에서 한 번 이상 생성되면 조기 중단
+    - 안전 상한: max_new_tokens=1024
     반환: (top1 리스트, topk 후보 리스트)
     """
-    beams = max(beams, topk, 1)
+    beams = max(1, beams, topk)
     all_top1, all_topk = [], []
+
+    eos_id = tokenizer.eos_token_id
+    pad_id = tokenizer.pad_token_id
+    stop = StoppingCriteriaList([EosBatchStop(eos_id)]) if eos_id is not None else None
+
     for i in range(0, len(inputs), batch_size):
         batch = inputs[i:i+batch_size]
-        enc = tokenizer(
-            batch, max_length=MAX_SRC_LEN, truncation=True, padding=True, return_tensors="pt"
-        )
+        enc = tokenizer(batch, max_length=MAX_SRC_LEN, truncation=True, padding=True, return_tensors="pt")
         enc = {k: v.to(device) for k, v in enc.items()}
+
         out = model.generate(
             **enc,
-            max_length=MAX_TGT_LEN,
             num_beams=beams,
             num_return_sequences=topk,
-            early_stopping=True,
             do_sample=False,
+            early_stopping=False,        # 모든 beam이 EOS 도달 시 정지
+            eos_token_id=eos_id,
+            pad_token_id=pad_id,
+            stopping_criteria=stop,     # 배치 차원의 EOS 체크(추가 안전장치)
+            max_new_tokens=32,        # 무한생성 방지 상한
             return_dict_in_generate=True,
         )
-        seqs = out.sequences  # (배치 크기 × topk, 길이)
+
+        seqs = out.sequences
         decoded = tokenizer.batch_decode(seqs, skip_special_tokens=True)
-        # 배치별로 topk 묶기
         for b in range(len(batch)):
             cand = [norm_text(t) for t in decoded[b*topk:(b+1)*topk]]
             all_topk.append(cand)
             all_top1.append(cand[0] if cand else "")
+
     return all_top1, all_topk
 
 # ==========================
-# 6) 메인: 로드 → 샘플링 → 생성 → 지표
+# 6) 메인
 # ==========================
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--json_dir", default=JSON_DIR_DEFAULT, type=str, help="문장별 tap-logs JSON 폴더")
-    ap.add_argument("--model_dir", default=MODEL_DIR_DEFAULT, type=str, help="학습 체크포인트 폴더")
-    ap.add_argument("--n", type=int, default=SAMPLE_SIZE_DEFAULT, help="평가에 사용할 샘플 개수")
-    ap.add_argument("--show", type=int, default=SHOW_COUNT_DEFAULT, help="상세 출력할 샘플 개수")
-    ap.add_argument("--topk", type=int, default=TOPK_DEFAULT, help="EM@K의 K 값")
-    ap.add_argument("--batch", type=int, default=BATCH_INFER_DEFAULT, help="추론 배치 크기")
-    ap.add_argument("--seed", type=int, default=SEED_DEFAULT, help="랜덤 시드")
+    ap.add_argument("--json_dir", default=JSON_DIR_DEFAULT, type=str)
+    ap.add_argument("--model_dir", default=MODEL_DIR_DEFAULT, type=str)
+    ap.add_argument("--n", type=int, default=SAMPLE_SIZE_DEFAULT)
+    ap.add_argument("--show", type=int, default=SHOW_COUNT_DEFAULT)
+    ap.add_argument("--topk", type=int, default=TOPK_DEFAULT)
+    ap.add_argument("--beams", type=int, default=5, help="num_beams (>= topk 권장)")
+    ap.add_argument("--batch", type=int, default=BATCH_INFER_DEFAULT)
+    ap.add_argument("--seed", type=int, default=SEED_DEFAULT)
     args = ap.parse_args()
 
     set_seed(args.seed)
@@ -289,14 +263,14 @@ def main():
     model_dir = Path(args.model_dir)
     device = get_device()
 
-    # (1) 데이터 로드(문장 단위 JSON → (presses, tgt))
+    # (1) 데이터 로드
     raw_items = load_dataset(json_dir)
 
-    # (2) 정규화 파라미터 로드(없으면 데이터에서 추정) → (ix,iy) 변환기 생성
+    # (2) 정규화 파라미터
     norm = load_norm_params(model_dir) or infer_norm_from_data(raw_items)
     get_ix_iy = make_ix_iy_getter(norm)
 
-    # (3) 학습과 동일한 프롬프트 구성
+    # (3) 프롬프트 구성
     data = []
     for it in raw_items:
         src = build_src_from_presses(it["presses"], get_ix_iy)
@@ -306,24 +280,25 @@ def main():
     if not data:
         raise ValueError("빈 시퀀스입니다. 입력 이벤트(MISS/BKSP 포함) 여부를 확인하세요.")
 
-    # (4) 평가용 샘플 무작위 추출
+    # (4) 샘플링
     if args.n < len(data):
         data = random.sample(data, args.n)
 
-    # (5) 모델/토크나이저 로드(체크포인트 없으면 베이스 모델로)
-    tokenizer = AutoTokenizer.from_pretrained(model_dir if model_dir.exists() else "KETI-AIR/ke-t5-small")
-    model = AutoModelForSeq2SeqLM.from_pretrained(model_dir if model_dir.exists() else "KETI-AIR/ke-t5-small")
+    # (5) 모델/토크나이저
+    base = "KETI-AIR/ke-t5-small"
+    tok = AutoTokenizer.from_pretrained(model_dir if model_dir.exists() else base)
+    model = AutoModelForSeq2SeqLM.from_pretrained(model_dir if model_dir.exists() else base)
     model.to(device).eval()
 
-    # (6) 생성(top-1, top-k 후보)
+    # (6) 생성
+    start = time.time()
     inputs = [d["src"] for d in data]
-    preds_top1, preds_topk = generate_topk(
-        model, tokenizer, device, inputs, topk=args.topk, beams=max(5, args.topk), batch_size=args.batch
+    preds_top1, preds_topk = generate_topk_until_eos(
+        model, tok, device, inputs, topk=args.topk, beams=max(args.beams, args.topk), batch_size=args.batch
     )
 
-    # (7) 지표 집계: EM, EM@K, WER/CER 평균
-    em_cnt, emk_cnt = 0, 0
-    wers, cers = [], []
+    # (7) 지표
+    em_cnt, emk_cnt, wers, cers = 0, 0, [], []
     per_details = []
     for d, p1, pk in zip(data, preds_top1, preds_topk):
         gt = d["tgt"]
@@ -331,16 +306,9 @@ def main():
         emk = (gt in pk)
         w = wer(gt, p1)
         c = cer(gt, p1)
-        em_cnt += int(em)
-        emk_cnt += int(emk)
-        wers.append(w)
-        cers.append(c)
-        per_details.append({
-            "file": d["file"],
-            "em": em, "emk": emk,
-            "wer": w, "cer": c,
-            "gt": gt, "pred": p1
-        })
+        em_cnt += int(em); emk_cnt += int(emk)
+        wers.append(w); cers.append(c)
+        per_details.append({"file": d["file"], "em": em, "emk": emk, "wer": w, "cer": c, "gt": gt, "pred": p1, "cands": pk})
 
     n = len(data)
     em_acc  = em_cnt / max(1, n)
@@ -348,15 +316,14 @@ def main():
     avg_wer = sum(wers) / max(1, len(wers))
     avg_cer = sum(cers) / max(1, len(cers))
 
-    # (8) 요약 출력
+    # (8) 요약/표시
     print("==== Evaluation (touchseq ➜ text) ====")
     print(f"- Samples evaluated : {n}")
     print(f"- EM@1 accuracy     : {em_acc*100:.2f}%")
     print(f"- EM@{args.topk} accuracy : {emk_acc*100:.2f}%")
     print(f"- Avg WER           : {avg_wer:.4f}")
-    print(f"- Avg CER           : {avg_cer:.4f}")
-    print("")
-    # (9) 샘플별 상세 출력(무작위로 args.show개)
+    print(f"- Avg CER           : {avg_cer:.4f}\n")
+
     print(f"==== Per-sample details (show {min(args.show, n)}) ====")
     show_items = random.sample(per_details, min(args.show, n))
     for i, it in enumerate(show_items, 1):
@@ -364,7 +331,14 @@ def main():
         print(f"    EM={it['em']} | EM@K={it['emk']} | WER={it['wer']:.4f} | CER={it['cer']:.4f}")
         print(f"    GT  : {it['gt']}")
         print(f"    Pred: {it['pred']}")
+        print(f"    Top-{len(it['cands'])} candidates:")
+        for j, c in enumerate(it["cands"], 1):
+            mark = " ← GT" if c == it["gt"] else ""
+            print(f"     {j:>2}. {c}{mark}")
         print()
+    print(f"Total elapsed time: {time.time() - start:.2f} seconds")
 
 if __name__ == "__main__":
     main()
+
+
