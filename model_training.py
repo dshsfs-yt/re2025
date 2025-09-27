@@ -29,10 +29,10 @@ MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
-BATCH_SIZE = 64  # per device
+BATCH_SIZE = 48  # per device
 EPOCHS     = 10000
 RUN_NAME   = "ke-t5-small-RnE2025_jamosplit"
-STEPS      = 5000
+STEPS      = 5000  # 평가/저장 주기 (스텝 단위)
 
 os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
 os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
@@ -276,6 +276,7 @@ args = Seq2SeqTrainingArguments(
     output_dir=str(SAVE_DIR),
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
+    num_train_epochs=EPOCHS,
     eval_strategy="steps",
     eval_steps=STEPS,
     save_strategy="steps",
