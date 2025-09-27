@@ -210,10 +210,11 @@ jamo_full = sorted(set(
     CHOSEONG_LIST + JUNGSEONG_LIST +
     list("ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ")
 ))
-specials = [SPACE_LABEL, BKSP_LABEL, MISS_LABEL, "@"]
+specials = [SPACE_LABEL, BKSP_LABEL, MISS_LABEL]
 existing = set(tokenizer.get_vocab().keys())
 new_tokens = [t for t in (jamo_full + specials) if t not in existing]
 num_added = tokenizer.add_tokens(new_tokens)
+num_added += tokenizer.add_special_tokens({"additional_special_tokens":["@"]})
 
 print(f"\n[Tokenizer] Added {num_added} tokens.")
 
