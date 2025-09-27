@@ -46,8 +46,8 @@ device   = torch.device("cuda" if use_cuda else "cpu")
 print(f"[Env] Device: {device} | CUDA: {use_cuda}")
 
 wandb.init(project=os.environ.get("WANDB_PROJECT", "RnE2025"),
-           name=os.environ.get("WANDB_NAME", RUN_NAME),
-           config={"model": MODEL_NAME, "batch": BATCH_SIZE})
+            name=os.environ.get("WANDB_NAME", RUN_NAME),
+            config={"model": MODEL_NAME, "batch": BATCH_SIZE})
 
 # ==========================
 # 2) JSON 폴더 로드 & 파싱
