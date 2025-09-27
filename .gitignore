@@ -1,14 +1,11 @@
 ckpt
-touch_data.csv
 tmp.py
-tap_sequences_dummy_100.csv
 saved_logs
 realtmp.py
-tokenized_samples.csv
-checkpoints
 wandb_api_key.txt
 wandb
 coordonly/checkpoints
 coordonly/touch_data.csv
 coordonly/touch_data(korean).csv
 saved_logs_nokk
+wrong_cases.txt
