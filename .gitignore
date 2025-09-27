@@ -11,3 +11,4 @@ wandb
 coordonly/checkpoints
 coordonly/touch_data.csv
 coordonly/touch_data(korean).csv
+saved_logs_nokk
