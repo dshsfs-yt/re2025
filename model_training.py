@@ -16,12 +16,13 @@ from transformers import (
     set_seed,
 )
 import torch
+import unicodedata as ud
 
 # ==========================
 # 0) 경로 및 기본 설정
 # ==========================
-JSON_DIR = Path("saved_logs")  # 문장별 JSON들이 들어있는 폴더
-SAVE_DIR = Path("ckpt/ke-t5-small-RnE2025")
+JSON_DIR = Path("saved_logs_nokk")  # 문장별 JSON들이 들어있는 폴더
+SAVE_DIR = Path("ckpt/ke-t5-small-RnE2025_jamosplit")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_NAME = "KETI-AIR/ke-t5-small"
@@ -30,37 +31,23 @@ set_seed(RANDOM_SEED)
 
 BATCH_SIZE = 64  # per device
 EPOCHS     = 10000
-RUN_NAME  = "ke-t5-small-RnE2025_1"
-STEPS=5000
+RUN_NAME   = "ke-t5-small-RnE2025_jamosplit"
+STEPS      = 5000
 
 os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
 os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
 os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
 
 # ==========================
-# 1) 디바이스/정밀도
+# 1) 디바이스 & 로거
 # ==========================
-def get_device_and_precision():
-    use_cuda = torch.cuda.is_available()
-    use_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
-    if use_cuda:
-        device = torch.device("cuda")
-        torch.backends.cudnn.benchmark = True
-        precision = {"bf16": torch.cuda.is_bf16_supported(), "fp16": False}
-    elif use_mps:
-        device = torch.device("mps")
-        precision = {"bf16": False, "fp16": False}
-    else:
-        device = torch.device("cpu")
-        precision = {"bf16": False, "fp16": False}
-    return device, precision, use_cuda
+use_cuda = torch.cuda.is_available()
+device   = torch.device("cuda" if use_cuda else "cpu")
+print(f"[Env] Device: {device} | CUDA: {use_cuda}")
 
-device, precision_kwargs, use_cuda = get_device_and_precision()
-try:
-    torch.set_float32_matmul_precision("high")
-except Exception:
-    pass
-print(f"[Device] {device} | CUDA: {use_cuda}")
+wandb.init(project=os.environ.get("WANDB_PROJECT", "RnE2025"),
+           name=os.environ.get("WANDB_NAME", RUN_NAME),
+           config={"model": MODEL_NAME, "batch": BATCH_SIZE})
 
 # ==========================
 # 2) JSON 폴더 로드 & 파싱
@@ -69,109 +56,116 @@ SPACE_LABEL = "[SPACE]"
 MISS_LABEL = "[MISS]"
 BKSP_LABEL = "[BKSP]"
 
+# -----------------------------
+# Hangul syllable → Jamo string
+# -----------------------------
+CHOSEONG_LIST = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"]
+JUNGSEONG_LIST = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"]
+JONGSEONG_LIST = [
+    "", "ㄱ","ㄲ","ㄳ","ㄴ","ㄵ","ㄶ","ㄷ","ㄹ","ㄺ","ㄻ","ㄼ","ㄽ","ㄾ","ㄿ","ㅀ",
+    "ㅁ","ㅂ","ㅄ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"
+]
+_JONG_SPLIT = {
+    "ㄳ":"ㄱㅅ", "ㄵ":"ㄴㅈ", "ㄶ":"ㄴㅎ", "ㄺ":"ㄹㄱ", "ㄻ":"ㄹㅁ", "ㄼ":"ㄹㅂ",
+    "ㄽ":"ㄹㅅ", "ㄾ":"ㄹㅌ", "ㄿ":"ㄹㅍ", "ㅀ":"ㄹㅎ", "ㅄ":"ㅂㅅ"
+}
+
+def _decompose_hangul_char(ch: str) -> str:
+    code = ord(ch)
+    if 0xAC00 <= code <= 0xD7A3:  # 가(AC00)~힣(D7A3)
+        s_index = code - 0xAC00
+        cho = s_index // 588
+        jung = (s_index % 588) // 28
+        jong = s_index % 28
+        out = [CHOSEONG_LIST[cho], JUNGSEONG_LIST[jung]]
+        j = JONGSEONG_LIST[jong]
+        if j:
+            out.extend(list(_JONG_SPLIT.get(j, j)))
+        return "".join(out)
+    return ch  # 비한글은 그대로
+
+def hangul_to_jamo_target(text: str, space_token: str = SPACE_LABEL) -> str:
+    text = ud.normalize("NFKC", text)
+    out = []
+    for ch in text:
+        if ch.isspace():
+            if not out or out[-1] != space_token:
+                out.append(space_token)
+        else:
+            out.append(_decompose_hangul_char(ch))
+    return "".join(out).strip(space_token)
+
 def _clip01(v: float) -> float:
     return max(0.0, min(1.0, float(v)))
 
-def _to01(v: float, vmin: float, vmax: float) -> float:
-    if vmax <= vmin:
-        return 0.5
-    return _clip01((float(v) - vmin) / (vmax - vmin))
+def _quantize_xy(x: float, y: float, x_min: float, x_max: float, y_min: float, y_max: float, q: int = 100) -> Tuple[int, int]:
+    xn = (x - x_min) / (x_max - x_min + 1e-9)
+    yn = (y - y_min) / (y_max - y_min + 1e-9)
+    xn = _clip01(xn)
+    yn = _clip01(yn)
+    ix = int(round(xn * (q - 1)))
+    iy = int(round(yn * (q - 1)))
+    return ix, iy
 
-def _q99(v01: float) -> int:
-    return int(round(_clip01(v01) * 99))
+# 입력 프롬프트 포맷(예: "12,34@ㅇ 13,28@ㅏ ...")
+PROMPT_FORMAT = "{seq}"
 
-def _canon_char_from_log(role: str, label: str) -> Tuple[bool, str]:
-    """학습 입력에 포함할지/무엇으로 넣을지 결정.
-    - CHAR: label의 첫 글자
-    - SPACE: [SPACE]
-    - MISS: [MISS]  (좌표가 있지만 글자가 안 찍힌 터치)
-    - BKSP: [BKSP]  (백스페이스 키 입력 자체를 신호로 사용)
-    """
-    role = (role or "").upper()
-    if role == "CHAR":
-        ch = (label or "")
-        return True, (ch[:1] if ch else "")
-    if role == "SPACE":
-        return True, SPACE_LABEL
-    if role == "MISS":
-        return True, MISS_LABEL
-    if role == "BKSP":
-        return True, BKSP_LABEL
-    # 기타(필요하면 확장)
-    return False, ""
-
-def _iter_json_files(json_dir: Path):
-    for p in sorted(json_dir.glob("*.json")):
-        yield p
-
-def _load_one_json(path: Path) -> Dict[str, Any]:
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-# 2-1) 1차 로드: 정규화 방식 판단 및 raw 좌표 수집(백업용)
-all_items: List[Dict[str, Any]] = []
-raw_xs, raw_ys = [], []
-has_norm_xy = True  # x_norm / y_norm 가정
-
-files = list(_iter_json_files(JSON_DIR))
-if len(files) == 0:
-    raise FileNotFoundError(f"No JSON files in: {JSON_DIR.resolve()}")
-
-for fp in files:
-    obj = _load_one_json(fp)
-    tgt = obj.get("target_sentence") or ""
-    logs_blocks = obj.get("logs") or []
-    if not tgt or not logs_blocks:
-        continue
-    block0 = logs_blocks[0] or {}
-    presses = block0.get("logs") or []
-
-    for e in presses:
-        role = (e.get("role") or "").upper()
-        # 네 가지 역할 모두 좌표 확인 대상
-        if ("x_norm" not in e) or ("y_norm" not in e):
-            has_norm_xy = False
-        if "x" in e and "y" in e:
-            try:
-                raw_xs.append(float(e["x"]))
-                raw_ys.append(float(e["y"]))
-            except Exception:
-                pass
-
-    all_items.append({"tgt": tgt, "presses": presses})
-
-if not all_items:
-    raise ValueError("유효한 샘플이 없습니다. JSON 구조와 필드를 확인하세요.")
-
-if (not has_norm_xy) and (not raw_xs or not raw_ys):
-    raise ValueError("x_norm/y_norm이 없고 raw x,y도 충분치 않습니다. 입력 JSON을 확인하세요.")
-
-# 2-2) 정규화 파라미터 계산(backup: raw)
-if has_norm_xy:
-    norm_source = "x_norm"
-    x_min = 0.0; x_max = 1.0
-    y_min = 0.0; y_max = 1.0
-else:
-    norm_source = "raw"
-    x_min, x_max = float(min(raw_xs)), float(max(raw_xs))
-    y_min, y_max = float(min(raw_ys)), float(max(raw_ys))
+def _normalize_xy(e: Dict[str, Any], x_min: float, x_max: float, y_min: float, y_max: float) -> Tuple[int, int]:
+    if "x_norm" in e and "y_norm" in e:
+        ix = int(round(_clip01(e["x_norm"]) * 99))
+        iy = int(round(_clip01(e["y_norm"]) * 99))
+        return ix, iy
+    return _quantize_xy(e["x"], e["y"], x_min, x_max, y_min, y_max, 100)
 
 def _get_ix_iy(e: Dict[str, Any]) -> Tuple[int, int]:
-    if norm_source == "x_norm":
-        x01 = float(e.get("x_norm", 0.5))
-        y01 = float(e.get("y_norm", 0.5))
-        return _q99(x01), _q99(y01)
-    else:
-        x = float(e.get("x", 0.0))
-        y = float(e.get("y", 0.0))
-        return _q99(_to01(x, x_min, x_max)), _q99(_to01(y, y_min, y_max))
+    # 키 없음 방지용
+    x = float(e.get("x", 0))
+    y = float(e.get("y", 0))
+    return _normalize_xy(e, x_min, x_max, y_min, y_max)
 
-PROMPT_FORMAT = "touchseq: {seq} -> text"
+def _load_json_files(json_dir: Path) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+    for p in sorted(json_dir.glob("*.json")):
+        with open(p, "r", encoding="utf-8") as f:
+            obj = json.load(f)
+        # obj 구조: {target_sentence:str, completed_count:int, logs:[{target, logs:[events...]}], ...}
+        # 세션들 중 마지막(완료된) 로그를 사용
+        for ses in obj.get("logs", []):
+            presses = ses.get("logs", [])
+            tgt = obj.get("target_sentence", "")
+            items.append({"presses": presses, "tgt": tgt})
+    return items
+
+all_items = _load_json_files(JSON_DIR)
+print(f"[Load] {len(all_items)} sessions")
+
+# 좌표 범위 산정(안전하게 전체 범위)
+xs, ys = [], []
+for it in all_items:
+    for e in it["presses"]:
+        if "x" in e and "y" in e:
+            xs.append(float(e["x"]))
+            ys.append(float(e["y"]))
+x_min = min(xs) if xs else 0.0
+x_max = max(xs) if xs else 1.0
+y_min = min(ys) if ys else 0.0
+y_max = max(ys) if ys else 1.0
+print(f"[Norm] x:[{x_min:.1f},{x_max:.1f}] y:[{y_min:.1f},{y_max:.1f}]")
 
 def build_src_from_presses(presses: List[Dict[str, Any]]) -> str:
     toks: List[str] = []
     for e in presses:
-        ok, ch = _canon_char_from_log(e.get("role"), e.get("label"))
+        role = e.get("role", "CHAR")
+        label = e.get("label", "")
+        if role == "SPACE":
+            ch, ok = SPACE_LABEL, True
+        elif role == "MISS":
+            ch, ok = MISS_LABEL, True
+        elif role == "BKSP":
+            ch, ok = BKSP_LABEL, True
+        else:
+            ch = label or e.get("key", "")
+            ok = isinstance(ch, str) and len(ch) > 0
         if not ok:
             continue
         ix, iy = _get_ix_iy(e)
@@ -182,49 +176,44 @@ def build_src_from_presses(presses: List[Dict[str, Any]]) -> str:
 src_texts, tgt_texts = [], []
 for it in all_items:
     s = build_src_from_presses(it["presses"])
-    t = (it["tgt"] or "").strip()
-    if s.strip() and t:
-        src_texts.append(s)
-        tgt_texts.append(t)
+    t_raw = (it["tgt"] or "").strip()
+    if s.strip() and t_raw:
+        t_jamo = hangul_to_jamo_target(t_raw, space_token=SPACE_LABEL)
+        if t_jamo:
+            src_texts.append(s)
+            tgt_texts.append(t_jamo)
 
 if len(src_texts) == 0:
     raise ValueError("모든 샘플이 비었습니다. 입력 이벤트가 남는지(MISS/BKSP 포함) 확인하세요.")
 
 print(f"\n[Data] Loaded {len(src_texts)} samples from {JSON_DIR}")
 
-# ==========================
-# 3) HF Datasets 변환 & 스플릿
-# ==========================
-df_for_ds = pd.DataFrame({"src": src_texts, "tgt": tgt_texts})
-all_ds = Dataset.from_pandas(df_for_ds, preserve_index=False).shuffle(seed=RANDOM_SEED)
-
-n = len(all_ds)
-split = int(n * 0.95) if n > 20 else max(1, n - 1)
+# =====================
+# 3) Dataset & Model
+# =====================
+raw_df = pd.DataFrame({"src": src_texts, "tgt": tgt_texts})
 raw_ds = DatasetDict({
-    "train": all_ds.select(range(split)),
-    "validation": all_ds.select(range(split, n)),
+    "train": Dataset.from_pandas(raw_df.sample(frac=0.9, random_state=RANDOM_SEED).reset_index(drop=True)),
+    "eval":  Dataset.from_pandas(raw_df.drop(raw_df.sample(frac=0.9, random_state=RANDOM_SEED).index).reset_index(drop=True)),
 })
-print(raw_ds)
 
-# ==========================
-# 4) 토크나이저/모델 및 토크나이즈
-# ==========================
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-
-
-
-model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
-
+try:
+    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
+except Exception:
+    model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 
 # ==========================
 # 4.5) 토큰 추가
 # ==========================
-
-
-new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ", "ㅂ", "ㄲ","ㄱ","ㄴ","ㄷ","ㄹ","ㅅ","ㅇ","ㅋ","ㅎ","ㅜ","ㅠ","ㅡ","[SPACE]","[BKSP]","[MISS]","@"]
-
-num_added=tokenizer.add_tokens(new_tokens)
-
+jamo_full = sorted(set(
+    CHOSEONG_LIST + JUNGSEONG_LIST +
+    list("ㄱㄴㄷㄹㅁㅂㅅㅇㅈㅊㅋㅌㅍㅎ")
+))
+specials = [SPACE_LABEL, BKSP_LABEL, MISS_LABEL, "@"]
+existing = set(tokenizer.get_vocab().keys())
+new_tokens = [t for t in (jamo_full + specials) if t not in existing]
+num_added = tokenizer.add_tokens(new_tokens)
 
 print(f"\n[Tokenizer] Added {num_added} tokens.")
 
@@ -233,7 +222,6 @@ old, new = model.get_input_embeddings().weight.size(0), len(tokenizer)
 if old != new:
     print(f"\n[fix] resize_token_embeddings: {old} -> {new}")
     model.resize_token_embeddings(new)
-
 
 try:
     model.to(device)
@@ -255,11 +243,6 @@ tokenized = raw_ds.map(
     remove_columns=raw_ds["train"].column_names,
 )
 
-
-
-
-
-
 # ==========================
 # 5) Collator
 # ==========================
@@ -274,77 +257,60 @@ collator = DataCollatorForSeq2Seq(
 # ==========================
 # 6) Metrics (생성 텍스트 exact-match)
 # ==========================
-def _replace_ignore(label_ids, ignore_id=-100, pad_id=None):
-    if pad_id is None:
-        pad_id = tokenizer.pad_token_id
-    return [[(tok if tok != ignore_id else pad_id) for tok in seq] for seq in label_ids]
-
-def compute_metrics(eval_preds):
-    preds, labels = eval_preds
+def compute_metrics(eval_pred):
+    preds, labels = eval_pred
     if isinstance(preds, tuple):
         preds = preds[0]
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
-    labels = _replace_ignore(labels, ignore_id=-100, pad_id=tokenizer.pad_token_id)
+    # -100 패딩 제거 후 디코딩
+    labels = [[t for t in seq if t != -100] for seq in labels]
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-    decoded_preds = [p.strip() for p in decoded_preds]
-    decoded_labels = [l.strip() for l in decoded_labels]
-    exact = sum(p == l for p, l in zip(decoded_preds, decoded_labels)) / max(1, len(decoded_preds))
-    return {"exact_match": exact}
+    # EM
+    em = sum(1 for p, l in zip(decoded_preds, decoded_labels) if p.strip() == l.strip()) / max(1, len(decoded_labels))
+    return {"exact_match": em}
 
 # ==========================
-# 7) TrainingArguments & Trainer
+# 7) Arguments
 # ==========================
-optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
-
-
-'''
-일단 임의로 인자 제거함
-load_best_model_at_end=True,
-    metric_for_best_model="exact_match",
-    greater_is_better=True,
-'''
-
 args = Seq2SeqTrainingArguments(
     output_dir=str(SAVE_DIR),
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
-    num_train_epochs=EPOCHS,
-    eval_strategy="steps",           
+    eval_strategy="steps",
     eval_steps=STEPS,
     save_strategy="steps",
     save_steps=STEPS,
     logging_strategy="steps",
-    logging_steps=100,
-    report_to="wandb",
-    run_name=RUN_NAME,
-    dataloader_pin_memory=use_cuda,
-    optim=optim_choice,
+    logging_steps=50,
+    report_to=["wandb"],
     predict_with_generate=True,
     generation_max_length=MAX_TGT_LEN,
     generation_num_beams=4,
-    save_total_limit=1,
-    **precision_kwargs,
+    load_best_model_at_end=True,
+    metric_for_best_model="exact_match",
+    greater_is_better=True,
+    fp16=use_cuda,  # CUDA일 때만 fp16 사용
 )
 
 trainer = Seq2SeqTrainer(
     model=model,
     args=args,
     train_dataset=tokenized["train"],
-    eval_dataset=tokenized["validation"],
+    eval_dataset=tokenized["eval"],
+    tokenizer=tokenizer,
     data_collator=collator,
-    processing_class=tokenizer,
     compute_metrics=compute_metrics,
 )
 
+# ==========================
+# 8) Train & Save
+# ==========================
 trainer.train()
-
-# (1) 모델/토크나이저 저장
 trainer.save_model(str(SAVE_DIR))
 tokenizer.save_pretrained(str(SAVE_DIR))
 
-# (2) 정규화/토큰 정보 저장
+# 정규화/프롬프트 메타 저장
 norm_params = {
-    "norm_source": norm_source,      # "x_norm" 또는 "raw"
     "x_min": x_min, "x_max": x_max,
     "y_min": y_min, "y_max": y_max,
     "quantize_to": 100,
