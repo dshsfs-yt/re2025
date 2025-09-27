@@ -171,7 +171,7 @@ def build_src_from_presses(presses: List[Dict[str, Any]], get_ix_iy) -> str:
         if not ok:
             continue
         ix, iy = get_ix_iy(e)
-        toks.append(f"{ch}@{ix:02d},{iy:02d}")
+        toks.append(f"{ix:02d},{iy:02d}@{ch}")
     return PROMPT_FORMAT.format(seq=" ".join(toks))
 
 def load_dataset(json_dir: Path) -> List[Dict[str, str]]:
