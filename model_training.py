@@ -175,7 +175,7 @@ def build_src_from_presses(presses: List[Dict[str, Any]]) -> str:
         if not ok:
             continue
         ix, iy = _get_ix_iy(e)
-        toks.append(f"{ch}@{ix:02d},{iy:02d}")
+        toks.append(f"{ix:02d},{iy:02d}@{ch}")
     return PROMPT_FORMAT.format(seq=" ".join(toks))
 
 # 2-3) 최종 DF 생성(빈 시퀀스/빈 타깃 제거)
@@ -352,7 +352,7 @@ norm_params = {
     "space_label": SPACE_LABEL,
     "miss_label": MISS_LABEL,
     "bksp_label": BKSP_LABEL,
-    "input_token_pattern": "{ch}@{ix:02d},{iy:02d}",
+    "input_token_pattern": "{ix:02d},{iy:02d}@{ch}",
     "roles_used": ["CHAR", "SPACE", "MISS", "BKSP"],
     "roles_ignored": [],
 }
