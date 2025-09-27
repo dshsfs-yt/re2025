@@ -20,18 +20,122 @@ import torch
 # ==========================
 # 0) 경로 및 기본 설정
 # ==========================
-JSON_DIR = Path("saved_logs")  # 문장별 JSON들이 들어있는 폴더
-SAVE_DIR = Path("ckpt/ke-t5-small-RnE2025")
+JSON_DIR = Path("saved_logs_nokk")  # 문장별 JSON들이 들어있는 폴더
+SAVE_DIR = Path("ckpt/ke-t5-small-RnE2025_jamosplit")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
-BATCH_SIZE = 64  # per device
+BATCH_SIZE = 48  # per device
 EPOCHS     = 10000
-RUN_NAME  = "ke-t5-small-RnE2025_1"
+RUN_NAME  = "ke-t5-small-RnE2025_jamosplit"
 STEPS=5000
+
+# -------------------------
+# Hangul constants & decomposition maps
+# -------------------------
+CHOSEONG = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"]
+# 기본(단일) 중성만 둔다 — 복합 중성은 아래 맵으로 분해하여 사용
+JUNGSEONG = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅛ","ㅜ","ㅠ","ㅡ","ㅣ"]
+# 종성 인덱스 표 (원래 표) — 필요에 따라 참조
+JONGSEONG = ["", "ㄱ","ㄲ","ㄳ","ㄴ","ㄵ","ㄶ","ㄷ","ㄹ","ㄺ","ㄻ","ㄼ","ㄽ","ㄾ","ㄿ","ㅀ","ㅁ","ㅂ","ㅄ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"]
+
+HANGUL_BASE = 0xAC00
+NUM_JUNG = 21
+NUM_JONG = 28
+
+# 복합 중성 -> 기본 자모 분해 맵 (요청하신 대로 ㅘ -> ㅗ + ㅏ 등)
+JUNG_DECOMPOSE_MAP = {
+    "ㅘ": ["ㅗ","ㅏ"],
+    "ㅙ": ["ㅗ","ㅐ"],
+    "ㅚ": ["ㅗ","ㅣ"],
+    "ㅝ": ["ㅜ","ㅓ"],
+    "ㅞ": ["ㅜ","ㅔ"],
+    "ㅟ": ["ㅜ","ㅣ"],
+    "ㅢ": ["ㅡ","ㅣ"],
+    # 단일 중성(예: ㅏ, ㅓ ...)은 그대로 처리 (맵에 없음)
+}
+
+# 복합 종성(겹받침)을 각 자음으로 분해하는 맵 — 전 항목 포함
+JONG_DECOMPOSE_MAP = {
+    "ㄳ": ["ㄱ","ㅅ"],
+    "ㄵ": ["ㄴ","ㅈ"],
+    "ㄶ": ["ㄴ","ㅎ"],
+    "ㄺ": ["ㄹ","ㄱ"],
+    "ㄻ": ["ㄹ","ㅁ"],
+    "ㄼ": ["ㄹ","ㅂ"],
+    "ㄽ": ["ㄹ","ㅅ"],
+    "ㄾ": ["ㄹ","ㅌ"],
+    "ㄿ": ["ㄹ","ㅍ"],
+    "ㅀ": ["ㄹ","ㅎ"],
+    "ㅄ": ["ㅂ","ㅅ"],
+    # 단일 종성(ㄱ, ㄴ, ...)은 맵에 없음 -> 그대로 사용
+}
+
+def is_hangul_syllable(ch: str) -> bool:
+    if not ch:
+        return False
+    o = ord(ch)
+    return HANGUL_BASE <= o <= 0xD7A3
+
+def decompose_hangul_char_to_key_jamos(ch: str) -> list:
+    """
+    한 음절을 '키 입력에 가까운' 자모 시퀀스로 분해.
+    예: '값' -> ['ㄱ','ㅏ','ㄱ','ㅅ']  (ㄳ -> ㄱ,ㅅ)
+         '과' -> ['ㄱ','ㅗ','ㅏ']     (ㅘ -> ㅗ,ㅏ)
+    """
+    sindex = ord(ch) - HANGUL_BASE
+    l_index = sindex // (NUM_JUNG * NUM_JONG)
+    v_index = (sindex % (NUM_JUNG * NUM_JONG)) // NUM_JONG
+    t_index = sindex % NUM_JONG
+
+    parts = []
+    # 초성
+    lead = CHOSEONG[l_index]
+    parts.append(lead)
+
+    # 중성: 복합이면 분해, 아니면 단일
+    # NOTE: JUNGSEONG (인덱스 표)에는 복합 모음(예: ㅘ 등)도 포함되어 있기 때문에
+    #       해당 인덱스로 얻은 값이 분해 맵에 있으면 분해한다.
+    # To get the jung string for v_index, map to original 21-list of JUNGSEONG_INDEXED:
+    # The classic 21-list including composite items:
+    JUNG_FULL = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"]
+    jung = JUNG_FULL[v_index]
+    if jung in JUNG_DECOMPOSE_MAP:
+        parts.extend(JUNG_DECOMPOSE_MAP[jung])
+    else:
+        parts.append(jung)
+
+    # 종성: 있으면 단일 또는 복합 -> 복합이면 분해해서 각 자음 추가
+    if t_index != 0:
+        jong = JONGSEONG[t_index]
+        if jong in JONG_DECOMPOSE_MAP:
+            parts.extend(JONG_DECOMPOSE_MAP[jong])
+        else:
+            parts.append(jong)
+
+    return parts
+
+def decompose_to_jamos_heavy(text: str, space_label="[SPACE]") -> str:
+    """
+    문장 전체를 분해(복합중성/복합종성 분해 포함).
+    공백은 space_label 토큰으로 대체.
+    """
+    out = []
+    for ch in (text or ""):
+        if ch == " ":
+            out.append(space_label)
+            continue
+        if is_hangul_syllable(ch):
+            out.extend(decompose_hangul_char_to_key_jamos(ch))
+            continue
+        # 숫자/영문/특수는 그대로 추가 (필요 시 규칙 추가)
+        out.append(ch)
+    return "".join(out)
+
+
 
 os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
 os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
@@ -182,8 +286,10 @@ def build_src_from_presses(presses: List[Dict[str, Any]]) -> str:
 src_texts, tgt_texts = [], []
 for it in all_items:
     s = build_src_from_presses(it["presses"])
-    t = (it["tgt"] or "").strip()
-    if s.strip() and t:
+    raw_t = (it["tgt"] or "").strip()
+    if s.strip() and raw_t:
+        # 타깃을 자소 단위로 분해해서 사용
+        t = decompose_to_jamos_heavy(raw_t)
         src_texts.append(s)
         tgt_texts.append(t)
 
@@ -210,9 +316,6 @@ print(raw_ds)
 # 4) 토크나이저/모델 및 토크나이즈
 # ==========================
 tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
-
-
-
 model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 
 
@@ -221,11 +324,10 @@ model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 # ==========================
 
 
-new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ", "ㅂ", "ㄲ","ㄱ","ㄴ","ㄷ","ㄹ","ㅅ","ㅇ","ㅋ","ㅎ","ㅜ","ㅠ","ㅡ","[SPACE]","[BKSP]","[MISS]","@"]
+new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ", "ㅂ", "ㄲ","ㄱ","ㄴ","ㄷ","ㄹ","ㅅ","ㅇ","ㅋ","ㅎ","ㅜ","ㅠ","ㅡ","[SPACE]","[BKSP]","[MISS]"]
 
 num_added=tokenizer.add_tokens(new_tokens)
-
-
+num_added=tokenizer.add_special_tokens({'additional_special_tokens': ["@"]})
 print(f"\n[Tokenizer] Added {num_added} tokens.")
 
 # 모델 임베딩 길이 조절
@@ -254,9 +356,6 @@ tokenized = raw_ds.map(
     batched=True,
     remove_columns=raw_ds["train"].column_names,
 )
-
-
-
 
 
 
