@@ -1,5 +1,4 @@
 # model_training.py — tap-logs(JSON per sentence) ➜ seq2seq(KE-T5)
-import wandb
 import os
 import json
 from pathlib import Path
