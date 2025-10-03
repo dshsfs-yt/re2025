@@ -1,7 +1,7 @@
 ckpt
 tmp.py
 saved_logs
-realtmp.py
+runner.py
 wandb_api_key.txt
 wandb
 coordonly/checkpoints
