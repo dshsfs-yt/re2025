@@ -83,7 +83,7 @@ def decompose_hangul_char_to_key_jamos(ch: str) -> list:
     """
     한 음절을 '키 입력에 가까운' 자모 시퀀스로 분해.
     예: '값' -> ['ㄱ','ㅏ','ㄱ','ㅅ']  (ㄳ -> ㄱ,ㅅ)
-         '과' -> ['ㄱ','ㅗ','ㅏ']     (ㅘ -> ㅗ,ㅏ)
+        '과' -> ['ㄱ','ㅗ','ㅏ']     (ㅘ -> ㅗ,ㅏ)
     """
     sindex = ord(ch) - HANGUL_BASE
     l_index = sindex // (NUM_JUNG * NUM_JONG)
