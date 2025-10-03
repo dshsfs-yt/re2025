@@ -9,3 +9,4 @@ coordonly/touch_data.csv
 coordonly/touch_data(korean).csv
 saved_logs_nokk
 wrong_cases.txt
+__pycache__
