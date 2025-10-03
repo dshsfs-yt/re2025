@@ -192,11 +192,6 @@ class HangulAutomaton:
 
             # (L만 있는 상태) -> 같은 자음으로 된소리 시도
             if self.L and self.V is None:
-                '''if (self.L, j) in L_DOUBLE_FROM:
-                    self.L = L_DOUBLE_FROM[(self.L, j)]
-                    self.stay = self.stay[:-1]
-                    self.stay.append(self.L)
-                    return'''
                 # 아니면 기존 L 확정(자음 단독) 후 새 초성 시작
                 self.output.append(self.L)
                 self.L = j
@@ -291,17 +286,7 @@ class HangulAutomaton:
             return
         last = self.output.pop()
         self.result.pop()
-        '''# 마지막이 완성형 음절이면 분해해서 버퍼로 옮긴 뒤, 자모 하나 제거
-        if '가' <= last <= '힣':
-            L, V, T = decompose_syllable(last)
-            self.L, self.V, self.T = L, V, T
-            # 한번 더 backspace 로직 수행(자모 하나 제거)
-            self.backspace()
-            # 조합 중인 상태 유지 (사용자가 이어서 다시 칠 수 있게)
-        else:
-            # 호환자모나 공백 등의 단일 토큰은 그냥 삭제로 종료
-            return
-'''
+        
 
     def get_text(self) -> str:
         # 화면 표시용: 현재 조합중 음절까지 포함해서 리턴
@@ -333,15 +318,9 @@ def run_labels(labels: list[str]) -> str:
         if lab == '[SPACE]':
             A.input_space(i)
         elif lab == '[BKSP]':
-            #print("# ----------------------------------")
-            #print(f"{A.get_text()}\n{A.get_logs()}, {A.stay}")
             A.backspace()
-            #print(f"{A.get_text()}\n{A.get_logs()}, {A.stay}")
-            #print("# ----------------------------------")
         elif lab != "[MISS]":
             A.input_char(lab, i)
-        '''if A.result:
-            print(A.get_logs()[-1], A.stay, i)'''
         i += 1
     return A.get_text() , A.get_logs()
 
@@ -530,17 +509,12 @@ def kk_transform(data):
         i += 1
 
     text, index_logs = run_labels(logs)
-    #index_logs = [x for sub in index_logs for x in sub]
+
 
     new_sentence, jamo_indexs = find_standalone_jamo(sentence)
     jamo_index_plet = [x for sub in jamo_indexs.values() for x in sub]
     new_logs = []
 
-    '''print(f"new_sentence: {new_sentence}")
-    print(text)
-    print(f"index_logs: {index_logs}, {len(index_logs)}")
-    print(f"jamo_index_plet: {jamo_index_plet}")
-    print(f"new_logs: {new_logs}")'''
 
     k = [index_logs[i][0] for i in range(len(index_logs)) if i in jamo_index_plet]
     for index in range(len(data["logs"][0]["logs"])):
@@ -571,7 +545,6 @@ def space_transform(data):
         i += 1
 
     text, index_logs = run_labels(logs)
-    #index_logs = [x for sub in index_logs for x in sub]
 
     new_sentence, space_indexs = find_continue_space(sentence)
     new_logs = []
@@ -619,12 +592,6 @@ def enter_transform(data):
     return result
 
 
-'''with open("data/origin/tap_logs_target1_20250912_113613.json", 'r', encoding='utf-8') as f:
-    data = json.load(f)
-
-new_data = transform(data)
-with open("data/kk_delete/tap_logs_target1_20250912_113613.json", 'w', encoding='utf-8') as f:
-    json.dump(new_data, f, ensure_ascii=False, indent=2)'''
 
 
 json_files = list(INPUT_DIR.glob("*.json"))
