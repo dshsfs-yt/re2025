@@ -343,7 +343,7 @@ def run_labels(labels: list[str]) -> str:
         '''if A.result:
             print(A.get_logs()[-1], A.stay, i)'''
         i += 1
-    return A.get_text()
+    return A.get_text() , A.get_logs()
 
 
 
