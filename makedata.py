@@ -4,7 +4,6 @@ from typing import  Dict, List
 import copy
 from pathlib import Path
 
-import unicodedata
 
 INPUT_DIR       = Path("saved_logs")    # JSON들이 있는 폴더
 OUTPUT_DIR      = Path("saved_logs_nokk")   # 저장할 폴더
@@ -344,7 +343,7 @@ def run_labels(labels: list[str]) -> str:
         '''if A.result:
             print(A.get_logs()[-1], A.stay, i)'''
         i += 1
-    return A.get_text(), A.get_logs()
+    return A.get_text()
 
 
 
