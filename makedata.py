@@ -576,11 +576,6 @@ def space_transform(data):
     new_sentence, space_indexs = find_continue_space(sentence)
     new_logs = []
 
-    '''print(f"new_sentence: {new_sentence}")
-    print(text)
-    print(f"index_logs: {index_logs}, {len(index_logs)}")
-    print(f"jamo_index_plet: {jamo_index_plet}")
-    print(f"new_logs: {new_logs}")'''
 
     k = [index_logs[i][0] for i in range(len(index_logs)) if i in space_indexs]
     for index in range(len(data["logs"][0]["logs"])):
@@ -595,6 +590,29 @@ def space_transform(data):
         {
             "target": new_sentence,
             "logs": list(new_logs)  # deque였다면 list로 변환
+            }
+        ]
+    }
+    return result
+
+def enter_transform(data):
+    sentence = data["target_sentence"]
+    logs = []
+    i = 0
+    for log in data["logs"][0]["logs"]:
+        if log["label"] != "[ENTER]":
+            label = log["label"]
+            logs.append(log)
+
+            i += 1
+
+    result = {
+    "target_sentence": sentence,
+    "completed_count": 1,  # 필요시 원본 값 사용
+    "logs": [
+        {
+            "target": sentence,
+            "logs": list(logs)  # deque였다면 list로 변환
             }
         ]
     }
@@ -616,6 +634,7 @@ for j in json_files:
         data = json.load(f)
 
     data = space_transform(data)
+    data=enter_transform(data)
 
     new_data = space_transform( kk_transform(data))
 
