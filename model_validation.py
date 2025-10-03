@@ -23,7 +23,7 @@ JSON_DIR_DEFAULT  = "saved_logs_nokk"
 MODEL_DIR_DEFAULT = "ckpt/ke-t5-small-RnE2025_jamosplit"
 MAX_SRC_LEN = 512
 MAX_TGT_LEN = 256
-SAMPLE_SIZE_DEFAULT = 2
+SAMPLE_SIZE_DEFAULT = 200
 SHOW_COUNT_DEFAULT  = 5
 TOPK_DEFAULT        = 5
 BATCH_INFER_DEFAULT = 32
@@ -324,8 +324,8 @@ def main():
     n = len(data)
     em_acc   = em_cnt / max(1, n)
     emk_acc  = emk_cnt / max(1, n)
-    avg_cer  = sum(cer_list) / max(1, len(cer_list))
-    avg_wer  = sum(wer_list) / max(1, len(wer_list))
+    avg_cer  = 1-(sum(cer_list) / max(1, len(cer_list)))
+    avg_wer  = 1-(sum(wer_list) / max(1, len(wer_list)))
 
     # 7) 결과 출력
     print("==== Evaluation (자모→음절 재조합 후 문장 비교) ====")
