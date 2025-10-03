@@ -15,6 +15,7 @@ from typing import Any, Dict, List, Tuple, Optional
 import torch
 from transformers import AutoModelForSeq2SeqLM, AutoTokenizer, StoppingCriteria, StoppingCriteriaList
 
+from krautomata import automata
 # ==========================
 # 0) 기본 상수
 # ==========================
@@ -22,7 +23,7 @@ JSON_DIR_DEFAULT  = "saved_logs_nokk"
 MODEL_DIR_DEFAULT = "ckpt/ke-t5-small-RnE2025_jamosplit"
 MAX_SRC_LEN = 512
 MAX_TGT_LEN = 256
-SAMPLE_SIZE_DEFAULT = 200
+SAMPLE_SIZE_DEFAULT = 2
 SHOW_COUNT_DEFAULT  = 5
 TOPK_DEFAULT        = 5
 BATCH_INFER_DEFAULT = 32
@@ -168,195 +169,6 @@ def build_src_from_presses(presses: List[Dict[str, Any]], get_ix_iy) -> str:
     return PROMPT_FORMAT.format(seq=" ".join(toks))
 
 # ==========================
-# 4) 자모<->음절: 오토마타 (기본 자모 입력을 합성)
-# ==========================
-# 표준 리스트(유니코드 조합용)
-CHOSEONG = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"]
-JUNG_FULL = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"]
-JONGSEONG = ["", "ㄱ","ㄲ","ㄳ","ㄴ","ㄵ","ㄶ","ㄷ","ㄹ","ㄺ","ㄻ","ㄼ","ㄽ","ㄾ","ㄿ","ㅀ","ㅁ","ㅂ","ㅄ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"]
-
-CHO_MAP  = {c:i for i,c in enumerate(CHOSEONG)}
-JUNG_MAP = {c:i for i,c in enumerate(JUNG_FULL)}
-JONG_MAP = {c:i for i,c in enumerate(JONGSEONG)}
-
-# 기본 모음
-VOWEL_BASIC = set(["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅛ","ㅜ","ㅠ","ㅡ","ㅣ"])
-# 합성 모음: 기본 모음의 연타(예: ㅗ+ㅏ→ㅘ)
-JUNG_FROM_BASICS = {
-    ("ㅗ","ㅏ"):"ㅘ",
-    ("ㅗ","ㅐ"):"ㅙ",
-    ("ㅗ","ㅣ"):"ㅚ",
-    ("ㅜ","ㅓ"):"ㅝ",
-    ("ㅜ","ㅔ"):"ㅞ",
-    ("ㅜ","ㅣ"):"ㅟ",
-    ("ㅡ","ㅣ"):"ㅢ",
-}
-# 겹받침 결합(예: ㄹ+ㄱ→ㄺ)
-JONG_FROM_BASICS = {
-    ("ㄱ","ㅅ"):"ㄳ",
-    ("ㄴ","ㅈ"):"ㄵ",
-    ("ㄴ","ㅎ"):"ㄶ",
-    ("ㄹ","ㄱ"):"ㄺ",
-    ("ㄹ","ㅁ"):"ㄻ",
-    ("ㄹ","ㅂ"):"ㄼ",
-    ("ㄹ","ㅅ"):"ㄽ",
-    ("ㄹ","ㅌ"):"ㄾ",
-    ("ㄹ","ㅍ"):"ㄿ",
-    ("ㄹ","ㅎ"):"ㅀ",
-    ("ㅂ","ㅅ"):"ㅄ",
-}
-JONG_SPLIT = {v:k for k,v in JONG_FROM_BASICS.items()}
-
-CONSONANTS = set(CHOSEONG)  # 초성 자모 집합
-VOWELS_ALL = VOWEL_BASIC.union(set(["ㅘ","ㅙ","ㅚ","ㅝ","ㅞ","ㅟ","ㅢ"]))
-
-HANGUL_BASE = 0xAC00
-
-def is_consonant(ch: str) -> bool:
-    return ch in CONSONANTS
-
-def is_vowel(ch: str) -> bool:
-    return ch in VOWELS_ALL
-
-def compose_vowel(v1: str, v2: str) -> Optional[str]:
-    return JUNG_FROM_BASICS.get((v1, v2))
-
-def compose_jong(t1: str, t2: str) -> Optional[str]:
-    return JONG_FROM_BASICS.get((t1, t2))
-
-def split_token_stream(s: str) -> List[str]:
-    """연속 문자열에서 [SPACE] 같은 대괄호 토큰을 하나로 취급하여 리스트로 분할"""
-    out = []
-    i = 0
-    n = len(s)
-    while i < n:
-        if s[i] == "[":
-            j = s.find("]", i+1)
-            if j != -1:
-                out.append(s[i:j+1])
-                i = j + 1
-                continue
-        out.append(s[i])
-        i += 1
-    return out
-
-def compose_syllable(l: str, v: str, t: Optional[str]) -> str:
-    """초성 l, 중성 v, 종성 t(없으면 None)를 하나의 음절로 조합"""
-    if l not in CHO_MAP or v not in JUNG_MAP:
-        return (l or "") + (v or "") + (t or "")
-    li = CHO_MAP[l]; vi = JUNG_MAP[v]
-    ti = 0
-    if t:
-        if t not in JONG_MAP:
-            return (l or "") + (v or "") + (t or "")
-        ti = JONG_MAP[t]
-    code = HANGUL_BASE + ((li * 21) + vi) * 28 + ti
-    return chr(code)
-
-def recompose_jamo_to_text(jamo_stream: str) -> str:
-    """자모/특수토큰 스트림(기본 자모 연타 포함) -> 한글 문자열 (오토마타)"""
-    toks = split_token_stream(jamo_stream)
-    out_chars: List[str] = []
-
-    L: Optional[str] = None
-    V: Optional[str] = None
-    T: Optional[str] = None
-
-    i = 0
-    n = len(toks)
-
-    def flush():
-        nonlocal L, V, T
-        if L and V:
-            out_chars.append(compose_syllable(L, V, T))
-        elif L and not V:
-            out_chars.append(L)
-        L = V = T = None
-
-    while i < n:
-        tok = toks[i]
-
-        # 특수 토큰
-        if tok == SPACE_LABEL:
-            flush(); out_chars.append(" "); i += 1; continue
-        if tok == MISS_LABEL:
-            i += 1; continue  # 비교엔 무시
-        if tok == BKSP_LABEL:
-            if L or V or T:
-                L = V = T = None
-            elif out_chars:
-                out_chars.pop()
-            i += 1; continue
-
-        # 자모 처리
-        if is_vowel(tok):
-            if L is None:
-                L = "ㅇ"  # 모음 먼저 입력 → 'ㅇ' 보정
-            if V is None:
-                V = tok
-                # 기본 모음 연타(예: ㅗ 다음 ㅏ) → 합성 시도
-                if i+1 < n and is_vowel(toks[i+1]):
-                    comb = compose_vowel(V, toks[i+1])
-                    if comb:
-                        V = comb; i += 1
-            else:
-                if T is not None:
-                    # 받침이 있는 상태에서 모음 등장 → 받침 이동 규칙
-                    if T in JONG_SPLIT:
-                        c1, c2 = JONG_SPLIT[T]
-                        out_chars.append(compose_syllable(L, V, c1))
-                        L, V, T = c2, tok, None
-                    else:
-                        out_chars.append(compose_syllable(L, V, None))
-                        L, V, T = T, tok, None
-                    if i+1 < n and is_vowel(toks[i+1]):
-                        comb = compose_vowel(V, toks[i+1])
-                        if comb:
-                            V = comb; i += 1
-                else:
-                    out_chars.append(compose_syllable(L, V, None))
-                    L, V, T = "ㅇ", tok, None
-                    if i+1 < n and is_vowel(toks[i+1]):
-                        comb = compose_vowel(V, toks[i+1])
-                        if comb:
-                            V = comb; i += 1
-            i += 1; continue
-
-        if is_consonant(tok):
-            if L is None:
-                L = tok; i += 1; continue
-            if V is None:
-                L = tok; i += 1; continue  # 초성 교체
-            if T is None:
-                # 다음이 모음이면 초성, 아니면 받침 가정
-                if i+1 < n and is_vowel(toks[i+1]):
-                    out_chars.append(compose_syllable(L, V, None))
-                    L, V, T = tok, None, None
-                else:
-                    T = tok
-                i += 1; continue
-            else:
-                # 겹받침 시도 (다음이 모음이면 겹받침 지양)
-                if i+1 < n and is_vowel(toks[i+1]):
-                    out_chars.append(compose_syllable(L, V, T))
-                    L, V, T = tok, None, None
-                    i += 1; continue
-                comb = compose_jong(T, tok)
-                if comb:
-                    T = comb; i += 1; continue
-                else:
-                    out_chars.append(compose_syllable(L, V, T))
-                    L, V, T = tok, None, None
-                    i += 1; continue
-
-        # 기타 문자 → flush 후 그대로 추가
-        flush()
-        out_chars.append(tok); i += 1
-
-    flush()
-    return ud.normalize("NFC", "".join(out_chars))
-
-# ==========================
 # 5) 거리/지표
 # ==========================
 def levenshtein(seq_a, seq_b) -> int:
@@ -484,8 +296,8 @@ def main():
         gt_text = ud.normalize("NFC", d["gt"])
 
         # 자모 스트림 → 음절 재조합
-        pred_text = recompose_jamo_to_text(p1_raw)
-        cand_texts = [recompose_jamo_to_text(s) for s in pk_raw]
+        pred_text = automata(p1_raw)
+        cand_texts = [automata(s) for s in pk_raw]
 
         em  = (pred_text == gt_text)
         emk = (gt_text in cand_texts)
