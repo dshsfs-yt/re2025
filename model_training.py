@@ -323,7 +323,7 @@ model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 # ==========================
 
 
-new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ", "ㅂ", "ㄲ","ㄱ","ㄴ","ㄷ","ㄹ","ㅅ","ㅇ","ㅋ","ㅎ","ㅜ","ㅠ","ㅡ","[SPACE]","[BKSP]","[MISS]","[FLUSH]","@"]
+new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ", "ㅂ", "ㄲ","ㄱ","ㄴ","ㄷ","ㄹ","ㅅ","ㅇ","ㅋ","ㅎ","ㅜ","ㅠ","ㅡ","[SPACE]","[BKSP]","[MISS]","@"]
 
 num_added=tokenizer.add_tokens(new_tokens)
 print(f"\n[Tokenizer] Added {num_added} tokens.")
