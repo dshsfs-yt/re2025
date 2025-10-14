@@ -593,7 +593,6 @@ def enter_transform(data):
 
 
 
-
 json_files = list(INPUT_DIR.glob("*.json"))
 
 for j in json_files:
@@ -601,16 +600,16 @@ for j in json_files:
         data = json.load(f)
 
     data = space_transform(data)
-    data=enter_transform(data)
+    data = enter_transform(data)
 
-    new_data = space_transform( kk_transform(data))
+    new_data = space_transform(kk_transform(data))
+
+
+
 
     new_name = f"{j.stem}_2{j.suffix}"
     out_path_new = OUTPUT_DIR / new_name
     out_path_orig = OUTPUT_DIR / j.name
-    if data['target_sentence'] == new_data['target_sentence']:
-        with out_path_new.open('w', encoding='utf-8') as wf:
-            json.dump(data, wf, ensure_ascii=False, indent=2)
-    if data["target_sentence"] != new_data["target_sentence"]:
-        with out_path_orig.open('w', encoding='utf-8') as wf2:
-            json.dump(new_data, wf2, ensure_ascii=False, indent=2)
+
+    with out_path_orig.open('w', encoding='utf-8') as wf2:
+        json.dump(new_data, wf2, ensure_ascii=False, indent=2)
