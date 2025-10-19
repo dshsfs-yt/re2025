@@ -28,18 +28,21 @@ RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
 BATCH_SIZE = 48  # per device
-EPOCHS     = 10000
-RUN_NAME  = "ke-t5-small-RnE2025_jamosplit"
-STEPS=5000
+EPOCHS = 10000
+RUN_NAME = "ke-t5-small-RnE2025_jamosplit"
+STEPS = 5000
 
 # -------------------------
 # Hangul constants & decomposition maps
 # -------------------------
-CHOSEONG = ["ㄱ","ㄲ","ㄴ","ㄷ","ㄸ","ㄹ","ㅁ","ㅂ","ㅃ","ㅅ","ㅆ","ㅇ","ㅈ","ㅉ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"]
+CHOSEONG = ["ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ",
+            "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅉ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"]
 # 기본(단일) 중성만 둔다 — 복합 중성은 아래 맵으로 분해하여 사용
-JUNGSEONG = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅛ","ㅜ","ㅠ","ㅡ","ㅣ"]
+JUNGSEONG = ["ㅏ", "ㅐ", "ㅑ", "ㅒ", "ㅓ", "ㅔ",
+             "ㅕ", "ㅖ", "ㅗ", "ㅛ", "ㅜ", "ㅠ", "ㅡ", "ㅣ"]
 # 종성 인덱스 표 (원래 표) — 필요에 따라 참조
-JONGSEONG = ["", "ㄱ","ㄲ","ㄳ","ㄴ","ㄵ","ㄶ","ㄷ","ㄹ","ㄺ","ㄻ","ㄼ","ㄽ","ㄾ","ㄿ","ㅀ","ㅁ","ㅂ","ㅄ","ㅅ","ㅆ","ㅇ","ㅈ","ㅊ","ㅋ","ㅌ","ㅍ","ㅎ"]
+JONGSEONG = ["", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ",
+             "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"]
 
 HANGUL_BASE = 0xAC00
 NUM_JUNG = 21
@@ -47,37 +50,39 @@ NUM_JONG = 28
 
 # 복합 중성 -> 기본 자모 분해 맵 (요청하신 대로 ㅘ -> ㅗ + ㅏ 등)
 JUNG_DECOMPOSE_MAP = {
-    "ㅘ": ["ㅗ","ㅏ"],
-    "ㅙ": ["ㅗ","ㅐ"],
-    "ㅚ": ["ㅗ","ㅣ"],
-    "ㅝ": ["ㅜ","ㅓ"],
-    "ㅞ": ["ㅜ","ㅔ"],
-    "ㅟ": ["ㅜ","ㅣ"],
-    "ㅢ": ["ㅡ","ㅣ"],
+    "ㅘ": ["ㅗ", "ㅏ"],
+    "ㅙ": ["ㅗ", "ㅐ"],
+    "ㅚ": ["ㅗ", "ㅣ"],
+    "ㅝ": ["ㅜ", "ㅓ"],
+    "ㅞ": ["ㅜ", "ㅔ"],
+    "ㅟ": ["ㅜ", "ㅣ"],
+    "ㅢ": ["ㅡ", "ㅣ"],
     # 단일 중성(예: ㅏ, ㅓ ...)은 그대로 처리 (맵에 없음)
 }
 
 # 복합 종성(겹받침)을 각 자음으로 분해하는 맵 — 전 항목 포함
 JONG_DECOMPOSE_MAP = {
-    "ㄳ": ["ㄱ","ㅅ"],
-    "ㄵ": ["ㄴ","ㅈ"],
-    "ㄶ": ["ㄴ","ㅎ"],
-    "ㄺ": ["ㄹ","ㄱ"],
-    "ㄻ": ["ㄹ","ㅁ"],
-    "ㄼ": ["ㄹ","ㅂ"],
-    "ㄽ": ["ㄹ","ㅅ"],
-    "ㄾ": ["ㄹ","ㅌ"],
-    "ㄿ": ["ㄹ","ㅍ"],
-    "ㅀ": ["ㄹ","ㅎ"],
-    "ㅄ": ["ㅂ","ㅅ"],
+    "ㄳ": ["ㄱ", "ㅅ"],
+    "ㄵ": ["ㄴ", "ㅈ"],
+    "ㄶ": ["ㄴ", "ㅎ"],
+    "ㄺ": ["ㄹ", "ㄱ"],
+    "ㄻ": ["ㄹ", "ㅁ"],
+    "ㄼ": ["ㄹ", "ㅂ"],
+    "ㄽ": ["ㄹ", "ㅅ"],
+    "ㄾ": ["ㄹ", "ㅌ"],
+    "ㄿ": ["ㄹ", "ㅍ"],
+    "ㅀ": ["ㄹ", "ㅎ"],
+    "ㅄ": ["ㅂ", "ㅅ"],
     # 단일 종성(ㄱ, ㄴ, ...)은 맵에 없음 -> 그대로 사용
 }
+
 
 def is_hangul_syllable(ch: str) -> bool:
     if not ch:
         return False
     o = ord(ch)
     return HANGUL_BASE <= o <= 0xD7A3
+
 
 def decompose_hangul_char_to_key_jamos(ch: str) -> list:
     """
@@ -100,7 +105,8 @@ def decompose_hangul_char_to_key_jamos(ch: str) -> list:
     #       해당 인덱스로 얻은 값이 분해 맵에 있으면 분해한다.
     # To get the jung string for v_index, map to original 21-list of JUNGSEONG_INDEXED:
     # The classic 21-list including composite items:
-    JUNG_FULL = ["ㅏ","ㅐ","ㅑ","ㅒ","ㅓ","ㅔ","ㅕ","ㅖ","ㅗ","ㅘ","ㅙ","ㅚ","ㅛ","ㅜ","ㅝ","ㅞ","ㅟ","ㅠ","ㅡ","ㅢ","ㅣ"]
+    JUNG_FULL = ["ㅏ", "ㅐ", "ㅑ", "ㅒ", "ㅓ", "ㅔ", "ㅕ", "ㅖ", "ㅗ", "ㅘ",
+                "ㅙ", "ㅚ", "ㅛ", "ㅜ", "ㅝ", "ㅞ", "ㅟ", "ㅠ", "ㅡ", "ㅢ", "ㅣ"]
     jung = JUNG_FULL[v_index]
     if jung in JUNG_DECOMPOSE_MAP:
         parts.extend(JUNG_DECOMPOSE_MAP[jung])
@@ -116,6 +122,7 @@ def decompose_hangul_char_to_key_jamos(ch: str) -> list:
             parts.append(jong)
 
     return parts
+
 
 def decompose_to_jamos_heavy(text: str, space_label="[SPACE]") -> str:
     """
@@ -135,17 +142,46 @@ def decompose_to_jamos_heavy(text: str, space_label="[SPACE]") -> str:
     return "".join(out)
 
 
+def map_tokens_to_extra_ids(text: str, token_map: Dict[str, str]) -> str:
+    """
+    텍스트 내의 커스텀 토큰을 extra_id로 매핑.
+    예: "ㄱㅏ[SPACE]ㄴㅏ" -> "<extra_id_22><extra_id_13><extra_id_33><extra_id_23><extra_id_13>"
+    """
+    result = []
+    i = 0
+    while i < len(text):
+        # 긴 토큰부터 매칭 시도 (예: [SPACE], [BKSP] 등)
+        matched = False
+        # 최대 7글자 토큰 ([FLUSH] 등)
+        for token_len in range(min(7, len(text) - i), 0, -1):
+            substr = text[i:i+token_len]
+            if substr in token_map:
+                result.append(token_map[substr])
+                i += token_len
+                matched = True
+                break
 
-os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
-os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
-os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
+        if not matched:
+            # 매핑되지 않은 문자는 그대로 유지 (숫자, 영문, 특수문자 등)
+            result.append(text[i])
+            i += 1
+
+    return "".join(result)
+
+
+# os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
+# os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
+# os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
 
 # ==========================
 # 1) 디바이스/정밀도
 # ==========================
+
+
 def get_device_and_precision():
     use_cuda = torch.cuda.is_available()
-    use_mps = hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
+    use_mps = hasattr(
+        torch.backends, "mps") and torch.backends.mps.is_available()
     if use_cuda:
         device = torch.device("cuda")
         torch.backends.cudnn.benchmark = True
@@ -157,6 +193,7 @@ def get_device_and_precision():
         device = torch.device("cpu")
         precision = {"bf16": False, "fp16": False}
     return device, precision, use_cuda
+
 
 device, precision_kwargs, use_cuda = get_device_and_precision()
 try:
@@ -172,16 +209,20 @@ SPACE_LABEL = "[SPACE]"
 MISS_LABEL = "[MISS]"
 BKSP_LABEL = "[BKSP]"
 
+
 def _clip01(v: float) -> float:
     return max(0.0, min(1.0, float(v)))
+
 
 def _to01(v: float, vmin: float, vmax: float) -> float:
     if vmax <= vmin:
         return 0.5
     return _clip01((float(v) - vmin) / (vmax - vmin))
 
+
 def _q99(v01: float) -> int:
     return int(round(_clip01(v01) * 99))
+
 
 def _canon_char_from_log(role: str, label: str) -> Tuple[bool, str]:
     """학습 입력에 포함할지/무엇으로 넣을지 결정.
@@ -203,13 +244,16 @@ def _canon_char_from_log(role: str, label: str) -> Tuple[bool, str]:
     # 기타(필요하면 확장)
     return False, ""
 
+
 def _iter_json_files(json_dir: Path):
     for p in sorted(json_dir.glob("*.json")):
         yield p
 
+
 def _load_one_json(path: Path) -> Dict[str, Any]:
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
+
 
 # 2-1) 1차 로드: 정규화 방식 판단 및 raw 좌표 수집(백업용)
 all_items: List[Dict[str, Any]] = []
@@ -252,12 +296,15 @@ if (not has_norm_xy) and (not raw_xs or not raw_ys):
 # 2-2) 정규화 파라미터 계산(backup: raw)
 if has_norm_xy:
     norm_source = "x_norm"
-    x_min = 0.0; x_max = 1.0
-    y_min = 0.0; y_max = 1.0
+    x_min = 0.0
+    x_max = 1.0
+    y_min = 0.0
+    y_max = 1.0
 else:
     norm_source = "raw"
     x_min, x_max = float(min(raw_xs)), float(max(raw_xs))
     y_min, y_max = float(min(raw_ys)), float(max(raw_ys))
+
 
 def _get_ix_iy(e: Dict[str, Any]) -> Tuple[int, int]:
     if norm_source == "x_norm":
@@ -269,7 +316,9 @@ def _get_ix_iy(e: Dict[str, Any]) -> Tuple[int, int]:
         y = float(e.get("y", 0.0))
         return _q99(_to01(x, x_min, x_max)), _q99(_to01(y, y_min, y_max))
 
+
 PROMPT_FORMAT = "touchseq: {seq} -> text"
+
 
 def build_src_from_presses(presses: List[Dict[str, Any]]) -> str:
     toks: List[str] = []
@@ -278,10 +327,14 @@ def build_src_from_presses(presses: List[Dict[str, Any]]) -> str:
         if not ok:
             continue
         ix, iy = _get_ix_iy(e)
+        # toks.append(f"{ix:02d},{iy:02d},{ch}")
         toks.append(f"{ix:02d},{iy:02d}@{ch}")
     return PROMPT_FORMAT.format(seq=" ".join(toks))
 
+
 # 2-3) 최종 DF 생성(빈 시퀀스/빈 타깃 제거)
+# 주의: TOKEN_TO_EXTRA_ID는 아직 정의되지 않았으므로, 데이터 로드 시점에는 원본 텍스트로 저장
+# 매핑은 토크나이저 로드 후에 적용
 src_texts, tgt_texts = [], []
 for it in all_items:
     s = build_src_from_presses(it["presses"])
@@ -300,8 +353,9 @@ print(f"\n[Data] Loaded {len(src_texts)} samples from {JSON_DIR}")
 # ==========================
 # 3) HF Datasets 변환 & 스플릿
 # ==========================
-df_for_ds = pd.DataFrame({"src": src_texts, "tgt": tgt_texts})
-all_ds = Dataset.from_pandas(df_for_ds, preserve_index=False).shuffle(seed=RANDOM_SEED)
+# 주의: 매핑 전 텍스트로 데이터셋을 먼저 생성하고, 나중에 매핑을 적용함
+all_ds = Dataset.from_pandas(
+    pd.DataFrame({"src": src_texts, "tgt": tgt_texts}), preserve_index=False).shuffle(seed=RANDOM_SEED)
 
 n = len(all_ds)
 split = int(n * 0.95) if n > 20 else max(1, n - 1)
@@ -319,20 +373,63 @@ model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 
 
 # ==========================
-# 4.5) 토큰 추가
+# 4.5) 토큰 매핑 (extra_id 재사용)
 # ==========================
 
+# 기존 ke-t5-small의 extra_id (100개)를 재사용하여 새로운 토큰으로 매핑
+# 이렇게 하면 모델 구조 변경 없이 사전학습된 임베딩을 활용할 수 있음
 
-new_tokens = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ", "ㅂ", "ㄲ","ㄱ","ㄴ","ㄷ","ㄹ","ㅅ","ㅇ","ㅋ","ㅎ","ㅜ","ㅠ","ㅡ","[SPACE]","[BKSP]","[MISS]","@"]
+JAMO_TOKENS = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ",
+               "ㅂ", "ㄲ", "ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅅ", "ㅇ", "ㅋ", "ㅎ", "ㅜ", "ㅠ", "ㅡ"]
 
-num_added=tokenizer.add_tokens(new_tokens)
-print(f"\n[Tokenizer] Added {num_added} tokens.")
+# SPECIAL_TOKENS = ["[SPACE]", "[BKSP]", "[MISS]", "[FLUSH]"]
+SPECIAL_TOKENS = ["[SPACE]", "[BKSP]", "[MISS]", "[FLUSH]", "@"]
 
-# 모델 임베딩 길이 조절
-old, new = model.get_input_embeddings().weight.size(0), len(tokenizer)
-if old != new:
-    print(f"\n[fix] resize_token_embeddings: {old} -> {new}")
-    model.resize_token_embeddings(new)
+# 토큰 -> extra_id 매핑 생성
+TOKEN_TO_EXTRA_ID = {}
+all_custom_tokens = JAMO_TOKENS + SPECIAL_TOKENS
+
+for idx, token in enumerate(all_custom_tokens):
+    TOKEN_TO_EXTRA_ID[token] = f"<extra_id_{idx}>"
+
+# 역방향 매핑도 생성 (디코딩 시 사용)
+EXTRA_ID_TO_TOKEN = {v: k for k, v in TOKEN_TO_EXTRA_ID.items()}
+
+print(
+    f"\n[Tokenizer] Mapped {len(TOKEN_TO_EXTRA_ID)} custom tokens to extra_ids (0-{len(TOKEN_TO_EXTRA_ID)-1})")
+print(f"  - Jamos: {len(JAMO_TOKENS)} tokens")
+print(f"  - Special tokens: {len(SPECIAL_TOKENS)} tokens")
+print(f"  - Remaining extra_ids: {100 - len(TOKEN_TO_EXTRA_ID)}")
+
+# 이제 매핑 정의가 완료되었으므로, src/tgt 텍스트에 매핑 적용
+print(f"\n[Mapping] Applying token mapping to {len(src_texts)} samples...")
+src_texts_mapped = [map_tokens_to_extra_ids(
+    s, TOKEN_TO_EXTRA_ID) for s in src_texts]
+tgt_texts_mapped = [map_tokens_to_extra_ids(
+    t, TOKEN_TO_EXTRA_ID) for t in tgt_texts]
+
+# 매핑 적용 전후 비교 (첫 번째 샘플 예시)
+if len(src_texts) > 0:
+    print(f"\n[Example] First sample mapping:")
+    print(f"  Before (src): {src_texts[0][:100]}...")
+    print(f"  After (src):  {src_texts_mapped[0][:100]}...")
+    print(f"  Before (tgt): {tgt_texts[0][:50]}...")
+    print(f"  After (tgt):  {tgt_texts_mapped[0][:100]}...")
+
+# 매핑된 텍스트로 데이터셋 재생성
+print(f"\n[Dataset] Recreating dataset with mapped tokens...")
+all_ds_mapped = Dataset.from_pandas(
+    pd.DataFrame({"src": src_texts_mapped, "tgt": tgt_texts_mapped}),
+    preserve_index=False
+).shuffle(seed=RANDOM_SEED)
+
+n_mapped = len(all_ds_mapped)
+split_mapped = int(n_mapped * 0.95) if n_mapped > 20 else max(1, n_mapped - 1)
+raw_ds = DatasetDict({
+    "train": all_ds_mapped.select(range(split_mapped)),
+    "validation": all_ds_mapped.select(range(split_mapped, n_mapped)),
+})
+print(f"  Updated raw_ds with mapped tokens: {raw_ds}")
 
 
 try:
@@ -343,11 +440,25 @@ except Exception:
 MAX_SRC_LEN = 512
 MAX_TGT_LEN = 256
 
+
 def tokenize_function(batch: Dict[str, List[str]]) -> Dict[str, Any]:
     enc = tokenizer(batch["src"], max_length=MAX_SRC_LEN, truncation=True)
-    lab = tokenizer(text_target=batch["tgt"], max_length=MAX_TGT_LEN, truncation=True)
+    lab = tokenizer(text_target=batch["tgt"],
+                    max_length=MAX_TGT_LEN, truncation=True)
     enc["labels"] = lab["input_ids"]
     return enc
+
+
+def reverse_map_extra_ids(text: str, extra_id_map: Dict[str, str]) -> str:
+    """
+    extra_id를 원래 토큰으로 역매핑.
+    예: "<extra_id_22><extra_id_13>" -> "ㄱㅏ"
+    """
+    result = text
+    for extra_id, token in extra_id_map.items():
+        result = result.replace(extra_id, token)
+    return result
+
 
 tokenized = raw_ds.map(
     tokenize_function,
@@ -355,6 +466,113 @@ tokenized = raw_ds.map(
     remove_columns=raw_ds["train"].column_names,
 )
 
+# ==========================
+# 토큰화된 데이터 샘플 출력
+# ==========================
+print("\n" + "=" * 80)
+print("토큰화된 데이터 샘플 확인")
+print("=" * 80)
+
+# 학습 데이터에서 첫 3개 샘플 출력
+num_samples_to_show = min(3, len(tokenized["train"]))
+
+# 매핑 전 원본 데이터도 가져오기
+for i in range(num_samples_to_show):
+    sample = tokenized["train"][i]
+
+    # 매핑 전 원본 텍스트 (raw_ds에서 가져오기)
+    original_src = raw_ds["train"][i]["src"]
+    original_tgt = raw_ds["train"][i]["tgt"]
+
+    # 토큰화된 데이터
+    input_ids = sample["input_ids"]
+    labels = sample["labels"]
+
+    # 디코딩 (special tokens 포함)
+    decoded_input = tokenizer.decode(input_ids, skip_special_tokens=False)
+    decoded_label = tokenizer.decode(
+        [tok if tok != -100 else tokenizer.pad_token_id for tok in labels],
+        skip_special_tokens=False
+    )
+
+    # extra_id를 원래 토큰으로 역매핑
+    decoded_input_remapped = reverse_map_extra_ids(
+        decoded_input, EXTRA_ID_TO_TOKEN)
+    decoded_label_remapped = reverse_map_extra_ids(
+        decoded_label, EXTRA_ID_TO_TOKEN)
+
+    print(f"\n[샘플 {i+1}]")
+    print(f"  Input IDs 길이: {len(input_ids)}")
+    print(f"  Label IDs 길이: {len(labels)}")
+
+    print(f"\n매핑 전 원본 Src:")
+    print(
+        f"    {original_src[:200]}{'...' if len(original_src) > 200 else ''}")
+
+    print(f"\n매핑 전 원본 Tgt:")
+    print(
+        f"    {original_tgt[:100]}{'...' if len(original_tgt) > 100 else ''}")
+
+    print(f"\n매핑 후 Input (extra_id):")
+    print(
+        f"    {decoded_input[:200]}{'...' if len(decoded_input) > 200 else ''}")
+
+    print(f"\n역매핑된 Input (자모 복원):")
+    print(
+        f"    {decoded_input_remapped[:200]}{'...' if len(decoded_input_remapped) > 200 else ''}")
+
+    print(f"\n매핑 후 Label (extra_id):")
+    print(
+        f"    {decoded_label[:100]}{'...' if len(decoded_label) > 100 else ''}")
+
+    print(f"\n역매핑된 Label (자모 복원):")
+    print(
+        f"    {decoded_label_remapped[:100]}{'...' if len(decoded_label_remapped) > 100 else ''}")
+
+    print(f"\nToken IDs (처음 30개):")
+    print(f"    input_ids: {input_ids[:30]}")
+    print(f"    labels: {labels[:30]}")
+
+    # <unk> 토큰이 있는지 확인
+    unk_count_input = decoded_input.count('<unk>')
+    unk_count_label = decoded_label.count('<unk>')
+    if unk_count_input > 0 or unk_count_label > 0:
+        print(f"\n<unk> 토큰 발견!")
+        print(f"    Input에 <unk> 개수: {unk_count_input}")
+        print(f"    Label에 <unk> 개수: {unk_count_label}")
+
+        # 매핑 적용 후 텍스트 확인
+        mapped_src = src_texts_mapped[i]
+        mapped_tgt = tgt_texts_mapped[i]
+
+        print(f"\n    매핑 적용 후 Src (처음 200자):")
+        print(f"      {mapped_src[:200]}")
+
+        print(f"\n    매핑 적용 후 Tgt (처음 100자):")
+        print(f"      {mapped_tgt[:100]}")
+
+        # 어떤 문자가 UNK로 변환되었는지 확인
+        if unk_count_input > 0:
+            print(f"\n    원본 src에서 매핑되지 않은 문자들:")
+            unique_chars = set(original_src)
+            unmapped_chars = []
+            for char in unique_chars:
+                if char not in TOKEN_TO_EXTRA_ID:
+                    unmapped_chars.append(char)
+            if unmapped_chars:
+                print(f"      매핑 안된 문자: {unmapped_chars[:20]}")  # 처음 20개만
+
+        if unk_count_label > 0:
+            print(f"\n    원본 tgt에서 매핑되지 않은 문자들:")
+            unique_chars = set(original_tgt)
+            unmapped_chars = []
+            for char in unique_chars:
+                if char not in TOKEN_TO_EXTRA_ID:
+                    unmapped_chars.append(char)
+            if unmapped_chars:
+                print(f"      매핑 안된 문자: {unmapped_chars[:20]}")
+
+print("\n" + "=" * 80)
 
 
 # ==========================
@@ -371,22 +589,33 @@ collator = DataCollatorForSeq2Seq(
 # ==========================
 # 6) Metrics (생성 텍스트 exact-match)
 # ==========================
+
+
 def _replace_ignore(label_ids, ignore_id=-100, pad_id=None):
     if pad_id is None:
         pad_id = tokenizer.pad_token_id
     return [[(tok if tok != ignore_id else pad_id) for tok in seq] for seq in label_ids]
+
 
 def compute_metrics(eval_preds):
     preds, labels = eval_preds
     if isinstance(preds, tuple):
         preds = preds[0]
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
-    labels = _replace_ignore(labels, ignore_id=-100, pad_id=tokenizer.pad_token_id)
+    labels = _replace_ignore(labels, ignore_id=-100,
+                             pad_id=tokenizer.pad_token_id)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
-    decoded_preds = [p.strip() for p in decoded_preds]
-    decoded_labels = [l.strip() for l in decoded_labels]
-    exact = sum(p == l for p, l in zip(decoded_preds, decoded_labels)) / max(1, len(decoded_preds))
+
+    # extra_id를 원래 토큰으로 역매핑
+    decoded_preds = [reverse_map_extra_ids(
+        p.strip(), EXTRA_ID_TO_TOKEN) for p in decoded_preds]
+    decoded_labels = [reverse_map_extra_ids(
+        l.strip(), EXTRA_ID_TO_TOKEN) for l in decoded_labels]
+
+    exact = sum(p == l for p, l in zip(decoded_preds,
+                decoded_labels)) / max(1, len(decoded_preds))
     return {"exact_match": exact}
+
 
 # ==========================
 # 7) TrainingArguments & Trainer
@@ -406,13 +635,13 @@ args = Seq2SeqTrainingArguments(
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
     num_train_epochs=EPOCHS,
-    eval_strategy="steps",           
+    eval_strategy="steps",
     eval_steps=STEPS,
     save_strategy="steps",
     save_steps=STEPS,
     logging_strategy="steps",
     logging_steps=100,
-    report_to="wandb",
+    report_to="none",
     run_name=RUN_NAME,
     dataloader_pin_memory=use_cuda,
     optim=optim_choice,

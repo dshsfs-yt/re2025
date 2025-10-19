@@ -35,6 +35,24 @@ BKSP_LABEL  = "[BKSP]"
 PROMPT_FORMAT = "touchseq: {seq} -> text"
 
 # ==========================
+# Token mapping (must match model_training.py)
+# ==========================
+JAMO_TOKENS = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ",
+               "ㅂ", "ㄲ", "ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅅ", "ㅇ", "ㅋ", "ㅎ", "ㅜ", "ㅠ", "ㅡ"]
+
+SPECIAL_TOKENS = ["[SPACE]", "[BKSP]", "[MISS]", "[FLUSH]", "@"]
+
+# Build token mappings
+TOKEN_TO_EXTRA_ID = {}
+all_custom_tokens = JAMO_TOKENS + SPECIAL_TOKENS
+
+for idx, token in enumerate(all_custom_tokens):
+    TOKEN_TO_EXTRA_ID[token] = f"<extra_id_{idx}>"
+
+# Reverse mapping for decoding
+EXTRA_ID_TO_TOKEN = {v: k for k, v in TOKEN_TO_EXTRA_ID.items()}
+
+# ==========================
 # 1) EOS stopping (batch)
 # ==========================
 class EosBatchStop(StoppingCriteria):
@@ -195,6 +213,16 @@ def word_wer(ref_text: str, hyp_text: str) -> float:
     hyp_tokens = [t for t in hyp_text.split() if t != ""]
     return levenshtein(ref_tokens, hyp_tokens) / max(1, len(ref_tokens))
 
+def reverse_map_extra_ids(text: str, extra_id_map: Dict[str, str]) -> str:
+    """
+    extra_id를 원래 토큰으로 역매핑.
+    예: "<extra_id_22><extra_id_13>" -> "ㄱㅏ"
+    """
+    result = text
+    for extra_id, token in extra_id_map.items():
+        result = result.replace(extra_id, token)
+    return result
+
 # ==========================
 # 6) 생성 + 재조합 + 평가
 # ==========================
@@ -228,8 +256,9 @@ def generate_topk_until_eos(model, tokenizer, device, inputs: List[str], topk: i
         seqs = out.sequences
         decoded = tokenizer.batch_decode(seqs, skip_special_tokens=True)
         for b in range(len(batch)):
-            # 원시(자모 스트림)들 — 예: 'ㅇㅗㅏㄹㄱ ...'
-            raw = [ud.normalize("NFC", t) for t in decoded[b*topk:(b+1)*topk]]
+            # extra_id를 원래 자모로 역매핑한 후 정규화
+            # 예: '<extra_id_22><extra_id_13>' -> 'ㄱㅏ'
+            raw = [ud.normalize("NFC", reverse_map_extra_ids(t, EXTRA_ID_TO_TOKEN)) for t in decoded[b*topk:(b+1)*topk]]
             all_topk.append(raw)
             all_top1.append(raw[0] if raw else "")
 
