@@ -39,10 +39,10 @@ CHOSEONG = ["ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ",
             "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅉ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"]
 # 기본(단일) 중성만 둔다 — 복합 중성은 아래 맵으로 분해하여 사용
 JUNGSEONG = ["ㅏ", "ㅐ", "ㅑ", "ㅒ", "ㅓ", "ㅔ",
-             "ㅕ", "ㅖ", "ㅗ", "ㅛ", "ㅜ", "ㅠ", "ㅡ", "ㅣ"]
+            "ㅕ", "ㅖ", "ㅗ", "ㅛ", "ㅜ", "ㅠ", "ㅡ", "ㅣ"]
 # 종성 인덱스 표 (원래 표) — 필요에 따라 참조
 JONGSEONG = ["", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ",
-             "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"]
+            "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"]
 
 HANGUL_BASE = 0xAC00
 NUM_JUNG = 21
@@ -381,7 +381,7 @@ model = AutoModelForSeq2SeqLM.from_pretrained(MODEL_NAME)
 # 이렇게 하면 모델 구조 변경 없이 사전학습된 임베딩을 활용할 수 있음
 
 JAMO_TOKENS = ["ㅆ", "ㅃ", "ㅈ", "ㅕ", "ㅑ", "ㅖ", "ㅣ", "ㄸ", "ㅗ", "ㅌ", "ㅍ", "ㅒ", "ㅔ", "ㅏ", "ㅊ", "ㅓ", "ㅉ", "ㅛ", "ㅐ", "ㅁ",
-               "ㅂ", "ㄲ", "ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅅ", "ㅇ", "ㅋ", "ㅎ", "ㅜ", "ㅠ", "ㅡ"]
+            "ㅂ", "ㄲ", "ㄱ", "ㄴ", "ㄷ", "ㄹ", "ㅅ", "ㅇ", "ㅋ", "ㅎ", "ㅜ", "ㅠ", "ㅡ"]
 
 # SPECIAL_TOKENS = ["[SPACE]", "[BKSP]", "[MISS]", "[FLUSH]"]
 SPECIAL_TOKENS = ["[SPACE]", "[BKSP]", "[MISS]", "[FLUSH]", "@"]
@@ -604,7 +604,7 @@ def compute_metrics(eval_preds):
         preds = preds[0]
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
     labels = _replace_ignore(labels, ignore_id=-100,
-                             pad_id=tokenizer.pad_token_id)
+                            pad_id=tokenizer.pad_token_id)
     decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
 
     # extra_id를 원래 토큰으로 역매핑
