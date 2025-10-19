@@ -76,10 +76,6 @@ JONG_DECOMPOSE_MAP = {
     # 단일 종성(ㄱ, ㄴ, ...)은 맵에 없음 -> 그대로 사용
 }
 
-#wandb 설정 (필요 시 활성화)
-os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
-os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
-os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
 
 
 def is_hangul_syllable(ch: str) -> bool:
@@ -174,9 +170,9 @@ def map_tokens_to_extra_ids(text: str, token_map: Dict[str, str]) -> str:
     return "".join(result)
 
 
-# os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
-# os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
-# os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
+os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
+os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
+os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
 
 # ==========================
 # 1) 디바이스/정밀도
