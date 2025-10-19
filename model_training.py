@@ -76,6 +76,11 @@ JONG_DECOMPOSE_MAP = {
     # 단일 종성(ㄱ, ㄴ, ...)은 맵에 없음 -> 그대로 사용
 }
 
+#wandb 설정 (필요 시 활성화)
+os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
+os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
+os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
+
 
 def is_hangul_syllable(ch: str) -> bool:
     if not ch:
@@ -641,7 +646,7 @@ args = Seq2SeqTrainingArguments(
     save_steps=STEPS,
     logging_strategy="steps",
     logging_steps=100,
-    report_to="none",
+    report_to="wandb",
     run_name=RUN_NAME,
     dataloader_pin_memory=use_cuda,
     optim=optim_choice,
