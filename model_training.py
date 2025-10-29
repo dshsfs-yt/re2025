@@ -362,6 +362,8 @@ print(f"\n[Data] Loaded {len(src_texts)} samples from {JSON_DIR}")
 all_ds = Dataset.from_pandas(
     pd.DataFrame({"src": src_texts, "tgt": tgt_texts}), preserve_index=False).shuffle(seed=RANDOM_SEED)
 
+all_ds=all_ds[:(len(all_ds)*0.9)] # 데이터셋 크기 90%로 축소
+
 n = len(all_ds)
 split = int(n * 0.95) if n > 20 else max(1, n - 1)
 raw_ds = DatasetDict({
