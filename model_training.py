@@ -16,7 +16,7 @@ from transformers import (
 )
 import torch
 
-from trainer import MonitoringSeq2SeqTrainer
+#from trainer import MonitoringSeq2SeqTrainer
 
 # ==========================
 # 0) 경로 및 기본 설정
@@ -678,15 +678,14 @@ args = Seq2SeqTrainingArguments(
 )
 
 
-trainer = MonitoringSeq2SeqTrainer(
+trainer = Seq2SeqTrainer(
     model=model,
     args=args,
     train_dataset=tokenized["train"],
     eval_dataset=tokenized["validation"],
     data_collator=collator,
-    tokenizer=tokenizer,
+    processing_class=tokenizer,
     compute_metrics=compute_metrics,
-    restrict_decode_vocab=VALID_TOKEN_ID
 )
 
 
