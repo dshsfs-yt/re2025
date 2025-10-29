@@ -16,21 +16,23 @@ from transformers import (
 )
 import torch
 
+from trainer import MonitoringSeq2SeqTrainer
+
 # ==========================
 # 0) 경로 및 기본 설정
 # ==========================
 JSON_DIR = Path("saved_logs_nokk")  # 문장별 JSON들이 들어있는 폴더
-SAVE_DIR = Path("ckpt/ke-t5-small-RnE2025_jamosplit")
+SAVE_DIR = Path("ckpt/ke-t5-small-RnE2025_jamosplit-restrictvocab_input2")
 SAVE_DIR.mkdir(parents=True, exist_ok=True)
 
 MODEL_NAME = "KETI-AIR/ke-t5-small"
 RANDOM_SEED = 42
 set_seed(RANDOM_SEED)
 
-BATCH_SIZE = 48  # per device
+BATCH_SIZE = 46  # per device
 EPOCHS = 10000
-RUN_NAME = "ke-t5-small-RnE2025_jamosplit"
-STEPS = 5000
+RUN_NAME = "ke-t5-small-RnE2025_jamosplit-restrictvocab_input2"
+STEPS = 500
 
 # -------------------------
 # Hangul constants & decomposition maps
@@ -170,7 +172,7 @@ def map_tokens_to_extra_ids(text: str, token_map: Dict[str, str]) -> str:
     return "".join(result)
 
 
-os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
+# os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
 os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
 os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
 
@@ -318,19 +320,21 @@ def _get_ix_iy(e: Dict[str, Any]) -> Tuple[int, int]:
         return _q99(_to01(x, x_min, x_max)), _q99(_to01(y, y_min, y_max))
 
 
-PROMPT_FORMAT = "touchseq: {seq} -> text"
+PROMPT_FORMAT = "touchseq: {seq} coordinate: {xy} -> text"
 
 
 def build_src_from_presses(presses: List[Dict[str, Any]]) -> str:
     toks: List[str] = []
+    cors: List[str] = []
     for e in presses:
         ok, ch = _canon_char_from_log(e.get("role"), e.get("label"))
         if not ok:
             continue
         ix, iy = _get_ix_iy(e)
         # toks.append(f"{ix:02d},{iy:02d},{ch}")
-        toks.append(f"{ix:02d},{iy:02d}@{ch}")
-    return PROMPT_FORMAT.format(seq=" ".join(toks))
+        toks.append(ch)
+        cors.append(f"{ix:02d},{iy:02d}")
+    return PROMPT_FORMAT.format(seq=" ".join(toks), xy=" ".join(cors))
 
 
 # 2-3) 최종 DF 생성(빈 시퀀스/빈 타깃 제거)
@@ -395,6 +399,19 @@ for idx, token in enumerate(all_custom_tokens):
 
 # 역방향 매핑도 생성 (디코딩 시 사용)
 EXTRA_ID_TO_TOKEN = {v: k for k, v in TOKEN_TO_EXTRA_ID.items()}
+
+
+# 제한된 token만 생성
+VALID_TOKEN_ID = [tokenizer.pad_token_id, tokenizer.eos_token_id]
+
+for token in EXTRA_ID_TO_TOKEN.keys():
+    token_id = tokenizer.convert_tokens_to_ids(token)
+    VALID_TOKEN_ID.append(token_id)
+
+# def restrict_decode_vocab(batch_idx, prefix_beam):
+#     return VALID_TOKEN_ID
+
+
 
 print(
     f"\n[Tokenizer] Mapped {len(TOKEN_TO_EXTRA_ID)} custom tokens to extra_ids (0-{len(TOKEN_TO_EXTRA_ID)-1})")
@@ -495,7 +512,7 @@ for i in range(num_samples_to_show):
         [tok if tok != -100 else tokenizer.pad_token_id for tok in labels],
         skip_special_tokens=False
     )
-
+    
     # extra_id를 원래 토큰으로 역매핑
     decoded_input_remapped = reverse_map_extra_ids(
         decoded_input, EXTRA_ID_TO_TOKEN)
@@ -597,15 +614,20 @@ def _replace_ignore(label_ids, ignore_id=-100, pad_id=None):
         pad_id = tokenizer.pad_token_id
     return [[(tok if tok != ignore_id else pad_id) for tok in seq] for seq in label_ids]
 
+def remove_special_tokens(label_ids: list):
+    special_token_ids = [tokenizer.pad_token_id, tokenizer.eos_token_id, tokenizer.unk_token_id]
+    return [[int(tok) for tok in seq if int(tok) not in special_token_ids] for seq in label_ids]
 
 def compute_metrics(eval_preds):
     preds, labels = eval_preds
     if isinstance(preds, tuple):
         preds = preds[0]
-    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+    decoded_preds = tokenizer.batch_decode(remove_special_tokens(preds), skip_special_tokens=False)
+
     labels = _replace_ignore(labels, ignore_id=-100,
                             pad_id=tokenizer.pad_token_id)
-    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=True)
+    labels = remove_special_tokens(labels)
+    decoded_labels = tokenizer.batch_decode(labels, skip_special_tokens=False)
 
     # extra_id를 원래 토큰으로 역매핑
     decoded_preds = [reverse_map_extra_ids(
@@ -613,8 +635,12 @@ def compute_metrics(eval_preds):
     decoded_labels = [reverse_map_extra_ids(
         l.strip(), EXTRA_ID_TO_TOKEN) for l in decoded_labels]
 
+    print("pred:", decoded_preds[:3])
+    print("label:", decoded_labels[:3])
+    
     exact = sum(p == l for p, l in zip(decoded_preds,
                 decoded_labels)) / max(1, len(decoded_preds))
+    
     return {"exact_match": exact}
 
 
@@ -624,24 +650,17 @@ def compute_metrics(eval_preds):
 optim_choice = "adamw_torch_fused" if use_cuda else "adamw_torch"
 
 
-'''
-일단 임의로 인자 제거함
-load_best_model_at_end=True,
-    metric_for_best_model="exact_match",
-    greater_is_better=True,
-'''
-
 args = Seq2SeqTrainingArguments(
     output_dir=str(SAVE_DIR),
     per_device_train_batch_size=BATCH_SIZE,
     per_device_eval_batch_size=BATCH_SIZE,
     num_train_epochs=EPOCHS,
-    eval_strategy="steps",
-    eval_steps=STEPS,
+    evaluation_strategy="steps",
+    eval_steps=50,
     save_strategy="steps",
     save_steps=STEPS,
     logging_strategy="steps",
-    logging_steps=100,
+    logging_steps=50,
     report_to="wandb",
     run_name=RUN_NAME,
     dataloader_pin_memory=use_cuda,
@@ -650,18 +669,26 @@ args = Seq2SeqTrainingArguments(
     generation_max_length=MAX_TGT_LEN,
     generation_num_beams=4,
     save_total_limit=1,
+    load_best_model_at_end=True,
+    metric_for_best_model="exact_match",
+    do_eval=True, 
+    greater_is_better=True,
+    learning_rate=5e-4,
     **precision_kwargs,
 )
 
-trainer = Seq2SeqTrainer(
+
+trainer = MonitoringSeq2SeqTrainer(
     model=model,
     args=args,
     train_dataset=tokenized["train"],
     eval_dataset=tokenized["validation"],
     data_collator=collator,
-    processing_class=tokenizer,
+    tokenizer=tokenizer,
     compute_metrics=compute_metrics,
+    restrict_decode_vocab=VALID_TOKEN_ID
 )
+
 
 trainer.train()
 
