@@ -31,7 +31,7 @@ set_seed(RANDOM_SEED)
 
 BATCH_SIZE = 46  # per device
 EPOCHS = 10000
-RUN_NAME = "ke-t5-small-RnE2025_jamosplit-restrictvocab_input2"
+RUN_NAME = "ke-t5-small-RnE2025_jamosplit"
 STEPS = 500
 
 # -------------------------
@@ -172,7 +172,7 @@ def map_tokens_to_extra_ids(text: str, token_map: Dict[str, str]) -> str:
     return "".join(result)
 
 
-# os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
+os.environ["WANDB_API_KEY"] = open("wandb_api_key.txt").read().strip()
 os.environ["WANDB_PROJECT"] = "RnE2025"         # 선택: 프로젝트명
 os.environ["WANDB_NAME"] = RUN_NAME       # 선택: 런 이름
 
