@@ -361,7 +361,7 @@ print(f"\n[Data] Loaded {len(src_texts)} samples from {JSON_DIR}")
 # 주의: 매핑 전 텍스트로 데이터셋을 먼저 생성하고, 나중에 매핑을 적용함
 
 tmp=pd.DataFrame({"src": src_texts, "tgt": tgt_texts})
-tmp=tmp[:(len(tmp)*0.9)] # 데이터셋 크기 90%로 축소
+tmp=tmp[:(int(len(tmp)*0.9))] # 데이터셋 크기 90%로 축소
 
 all_ds = Dataset.from_pandas(
     tmp, preserve_index=False).shuffle(seed=RANDOM_SEED)
