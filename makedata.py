@@ -721,7 +721,6 @@ new_data = transform(data)
 with open("data/kk_delete/tap_logs_target1_20250912_113613.json", 'w', encoding='utf-8') as f:
     json.dump(new_data, f, ensure_ascii=False, indent=2)'''
 
-
 json_files = list(INPUT_DIR.glob("*.json"))
 
 for j in json_files:
@@ -730,11 +729,10 @@ for j in json_files:
 
     data = space_transform(data)
     data = enter_transfomr(data)
-    data = bksp_delete(data)
 
     new_data = space_transform(kk_transform(data))
 
-
+    new_data = bksp_delete(new_data)
 
 
     new_name = f"{j.stem}_2{j.suffix}"
@@ -743,11 +741,3 @@ for j in json_files:
 
     with out_path_orig.open('w', encoding='utf-8') as wf2:
         json.dump(new_data, wf2, ensure_ascii=False, indent=2)
-
-
-    '''
-    if data["target_sentence"] != new_data["target_sentence"]:
-        with out_path_new.open('w', encoding='utf-8') as wf:
-            json.dump(new_data, wf, ensure_ascii=False, indent=2)
-        with out_path_orig.open('w', encoding='utf-8') as wf2:
-            json.dump(data, wf2, ensure_ascii=False, indent=2)'''
