@@ -1,12 +1,15 @@
 from __future__ import annotations
-import json,unicodedata
-from typing import  Dict, List
+import argparse, json, math, os, re, sys, unicodedata
+from collections import Counter, defaultdict, deque
+from datetime import datetime
+from typing import Any, Dict, Iterable, List, Tuple, Union, Optional
 import copy
 from pathlib import Path
 
+import unicodedata
 
 INPUT_DIR       = Path("saved_logs")    # JSON들이 있는 폴더
-OUTPUT_DIR      = Path("saved_logs_nokk")   # 저장할 폴더
+OUTPUT_DIR      = Path("saved_logs_nobksp")   # 저장할 폴더
 RECURSIVE       = True                 # 하위 폴더까지 처리할지
 KEEP_STRUCTURE  = True                 # 입력 폴더 구조를 보존할지
 PATTERN         = "*.json"             # 처리할 파일 패턴
@@ -82,6 +85,9 @@ class HangulAutomaton:
         self.stay = []
         self.result = []
 
+        self.enter_index = []
+        self.enter_delete_number = []
+
 
     # ---- 내부 유틸 ----
     def _flush(self):
@@ -95,6 +101,7 @@ class HangulAutomaton:
             self.output.append(self.V)
         elif self.T and not (self.L or self.V):
             self.output.append(self.T)
+
         # 버퍼 초기화
         self.L = self.V = self.T = None
 
@@ -115,6 +122,13 @@ class HangulAutomaton:
         self.output.append(' ')
 
         self.result.append([i])
+
+    def input_enter(self, i):
+        self._flush()
+        self.output.append("\n")
+
+        self.result.append([i])
+
 
     def input_char(self, j: str, i: int):
         # 1) 모음 입력
@@ -192,6 +206,11 @@ class HangulAutomaton:
 
             # (L만 있는 상태) -> 같은 자음으로 된소리 시도
             if self.L and self.V is None:
+                '''if (self.L, j) in L_DOUBLE_FROM:
+                    self.L = L_DOUBLE_FROM[(self.L, j)]
+                    self.stay = self.stay[:-1]
+                    self.stay.append(self.L)
+                    return'''
                 # 아니면 기존 L 확정(자음 단독) 후 새 초성 시작
                 self.output.append(self.L)
                 self.L = j
@@ -252,11 +271,11 @@ class HangulAutomaton:
         # 3) 그 밖(예: 이모지 등)은 바로 확정
         self._commit_char(j, i)
 
-    def backspace(self):
+    def backspace(self, i: int, re = False):
         # 1) 조합 중이면 자모 하나만 단계적으로 해제
         if self.L or self.V or self.T:
             #print(self.L, self.V, self.T, self.stay)
-            self.stay.pop()
+            a = self.stay.pop()
             # 종성부터 되돌리기
             if self.T:
                 # 쌍종성이면 뒤 자모만 풀기
@@ -265,28 +284,46 @@ class HangulAutomaton:
                     self.T = t1
                 else:
                     self.T = None
-                return
+                return i, [a, ["ㄱ"]]
             # 복모음이면 뒤 모음만 풀기
             if self.V and self.V in V_SPLIT:
                 v1, v2 = V_SPLIT[self.V]
                 self.V = v1  # 뒤 모음은 제거
-                return
+                return i, [a, ["ㄱ"]]
             # 중성 제거
             if self.V:
                 self.V = None
-                return
+                return i, [a, ["ㄱ"]]
             # 초성 제거
             if self.L:
                 self.L = None
-                return
-            return
+                return i, [a, ["ㄱ"]]
+            return i, [a, ["ㄱ"]]
 
         # 2) 조합 중이 아니면 마지막 확정 글자에서 자모 하나 되돌리기
         if not self.output:
-            return
+            return i, [-1, []]
+
         last = self.output.pop()
-        self.result.pop()
-        
+        last_i = self.result.pop()
+        if re:
+            return i, [last_i, last]
+
+        if last == "\n":
+            self.enter_delete_number.append(len(self.result[-1]))
+            self.enter_index.append(i)
+
+        '''# 마지막이 완성형 음절이면 분해해서 버퍼로 옮긴 뒤, 자모 하나 제거
+        if '가' <= last <= '힣':
+            L, V, T = decompose_syllable(last)
+            self.L, self.V, self.T = L, V, T
+            # 한번 더 backspace 로직 수행(자모 하나 제거)
+            self.backspace()
+            # 조합 중인 상태 유지 (사용자가 이어서 다시 칠 수 있게)
+        else:
+            # 호환자모나 공백 등의 단일 토큰은 그냥 삭제로 종료
+            return
+'''
 
     def get_text(self) -> str:
         # 화면 표시용: 현재 조합중 음절까지 포함해서 리턴
@@ -306,23 +343,45 @@ class HangulAutomaton:
     def get_logs(self):
         return self.result
 
+    def get_enter(self):
+        return self.enter_index, self.enter_delete_number
+
 # --- 3) 외부 사용 함수 ---
-def run_labels(labels: list[str]) -> str:
+def run_labels(labels: list[str], enter: bool = False, bksp = False) -> str:
     """
     labels: ['ㅇ','ㄴ','ㅏ','ㄴ','ㅠ','ㅠ'] 처럼 자모/스페이스/백스페이스 순서
             스페이스는 '[SPACE]', 백스페이스는 '[BKSP]' 문자열 사용
     """
     A = HangulAutomaton()
     i = 0
+    bksp_d = {}
     for lab in labels:
         if lab == '[SPACE]':
             A.input_space(i)
         elif lab == '[BKSP]':
-            A.backspace()
+            #print("# ----------------------------------")
+            #print(f"{A.get_text()}\n{A.get_logs()}, {A.stay}")
+            if not bksp:
+                A.backspace(i, re=bksp)
+            elif bksp:
+                index, d = A.backspace(i, re=bksp)
+                bksp_d[index] = d
+
+            #print(f"{A.get_text()}\n{A.get_logs()}, {A.stay}")
+            #print("# ----------------------------------")
+        elif lab == "[ENTER]":
+            A.input_enter(i)
         elif lab != "[MISS]":
             A.input_char(lab, i)
+        '''if A.result:
+            print(A.get_logs()[-1], A.stay, i)'''
         i += 1
-    return A.get_text() , A.get_logs()
+    if not enter and not bksp:
+        return A.get_text(), A.get_logs()
+    elif bksp:
+        return bksp_d
+    else:
+        return A.get_enter()
 
 
 
@@ -487,7 +546,7 @@ def find_continue_space(text: str):
     indexs = []
     sentence = ""
     for i, t in enumerate(text):
-        if before == t == " ":
+        if before == t == " " or (before is None and t == " "):
             indexs.append(i)
         else:
             sentence += t
@@ -509,12 +568,17 @@ def kk_transform(data):
         i += 1
 
     text, index_logs = run_labels(logs)
-
+    #index_logs = [x for sub in index_logs for x in sub]
 
     new_sentence, jamo_indexs = find_standalone_jamo(sentence)
     jamo_index_plet = [x for sub in jamo_indexs.values() for x in sub]
     new_logs = []
 
+    '''print(f"new_sentence: {new_sentence}")
+    print(text)
+    print(f"index_logs: {index_logs}, {len(index_logs)}")
+    print(f"jamo_index_plet: {jamo_index_plet}")
+    print(f"new_logs: {new_logs}")'''
 
     k = [index_logs[i][0] for i in range(len(index_logs)) if i in jamo_index_plet]
     for index in range(len(data["logs"][0]["logs"])):
@@ -545,10 +609,16 @@ def space_transform(data):
         i += 1
 
     text, index_logs = run_labels(logs)
+    #index_logs = [x for sub in index_logs for x in sub]
 
     new_sentence, space_indexs = find_continue_space(sentence)
     new_logs = []
 
+    '''print(f"new_sentence: {new_sentence}")
+    print(text)
+    print(f"index_logs: {index_logs}, {len(index_logs)}")
+    print(f"jamo_index_plet: {jamo_index_plet}")
+    print(f"new_logs: {new_logs}")'''
 
     k = [index_logs[i][0] for i in range(len(index_logs)) if i in space_indexs]
     for index in range(len(data["logs"][0]["logs"])):
@@ -568,16 +638,28 @@ def space_transform(data):
     }
     return result
 
-def enter_transform(data):
+def enter_transfomr(data):
     sentence = data["target_sentence"]
     logs = []
-    i = 0
     for log in data["logs"][0]["logs"]:
-        if log["label"] != "[ENTER]":
-            label = log["label"]
-            logs.append(log)
+        if log["label"] == "[ENTER]":
+            log["label"] = "[SPACE]"
+        logs.append(log)
 
-            i += 1
+    '''new_logs = []
+    index_enter, delete_enter_number = run_labels(logs, enter= True)
+
+    for index in range(len(data["logs"][0]["logs"])):
+        log = data["logs"][0]["logs"][index]
+        try:
+            pos = index_enter.index(index)
+            for _ in range(delete_enter_number[pos] - 1):
+                new_logs.append(log)
+
+        except ValueError:
+            if data["logs"][0]["logs"][index]["label"] != "[ENTER]":
+                new_logs.append(log)'''
+
 
     result = {
     "target_sentence": sentence,
@@ -591,6 +673,51 @@ def enter_transform(data):
     }
     return result
 
+def bksp_delete(data):
+    sentence = data["target_sentence"]
+    logs = []
+    labels = []
+    for log in data["logs"][0]["logs"]:
+        logs.append(log)
+        labels.append(log["label"])
+
+
+    new_logs = []
+    index = []
+
+    bksp_d = run_labels(labels, bksp=True)
+
+
+    stack = 0
+
+    for i, log in enumerate(logs):
+        if log["label"] == "[BKSP]":
+            stack += len(split_korean(bksp_d[i][1]))
+        elif stack:
+            stack -= 1
+        else:
+            new_logs.append(log)
+
+
+    result = {
+    "target_sentence": sentence,
+    "completed_count": 1,  # 필요시 원본 값 사용
+    "logs": [
+        {
+            "target": sentence,
+            "logs": list(new_logs)  # deque였다면 list로 변환
+            }
+        ]
+    }
+    return result
+
+
+'''with open("data/origin/tap_logs_target1_20250912_113613.json", 'r', encoding='utf-8') as f:
+    data = json.load(f)
+
+new_data = transform(data)
+with open("data/kk_delete/tap_logs_target1_20250912_113613.json", 'w', encoding='utf-8') as f:
+    json.dump(new_data, f, ensure_ascii=False, indent=2)'''
 
 
 json_files = list(INPUT_DIR.glob("*.json"))
@@ -600,7 +727,8 @@ for j in json_files:
         data = json.load(f)
 
     data = space_transform(data)
-    data = enter_transform(data)
+    data = enter_transfomr(data)
+    data = bksp_delete(data)
 
     new_data = space_transform(kk_transform(data))
 
@@ -613,3 +741,11 @@ for j in json_files:
 
     with out_path_orig.open('w', encoding='utf-8') as wf2:
         json.dump(new_data, wf2, ensure_ascii=False, indent=2)
+
+
+    '''
+    if data["target_sentence"] != new_data["target_sentence"]:
+        with out_path_new.open('w', encoding='utf-8') as wf:
+            json.dump(new_data, wf, ensure_ascii=False, indent=2)
+        with out_path_orig.open('w', encoding='utf-8') as wf2:
+            json.dump(data, wf2, ensure_ascii=False, indent=2)'''

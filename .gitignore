@@ -10,3 +10,5 @@ coordonly/touch_data(korean).csv
 saved_logs_nokk
 wrong_cases.txt
 __pycache__
+saved_logs_nobksp
+temp.py

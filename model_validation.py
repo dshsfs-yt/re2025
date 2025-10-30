@@ -21,11 +21,11 @@ from krautomata import automata
 # ==========================
 # 0) 기본 상수
 # ==========================
-JSON_DIR_DEFAULT  = "saved_logs_nokk"
-MODEL_DIR_DEFAULT = "ckpt/ke-t5-small-RnE2025_jamosplit"
+JSON_DIR_DEFAULT  = "saved_logs_nobksp"
+MODEL_DIR_DEFAULT = "ckpt/ke-t5-small-RnE2025_jamosplit-restrictvocab_input2/checkpoint-87000"
 MAX_SRC_LEN = 512
 MAX_TGT_LEN = 256
-SAMPLE_SIZE_DEFAULT = 200
+SAMPLE_SIZE_DEFAULT = 467
 SHOW_COUNT_DEFAULT  = 5
 TOPK_DEFAULT        = 5
 BATCH_INFER_DEFAULT = 32
