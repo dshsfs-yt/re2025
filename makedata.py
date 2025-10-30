@@ -672,7 +672,6 @@ def enter_transfomr(data):
         ]
     }
     return result
-
 def bksp_delete(data):
     sentence = data["target_sentence"]
     logs = []
@@ -683,6 +682,7 @@ def bksp_delete(data):
 
 
     new_logs = []
+    new_label = []
     index = []
 
     bksp_d = run_labels(labels, bksp=True)
@@ -697,6 +697,9 @@ def bksp_delete(data):
             stack -= 1
         else:
             new_logs.append(log)
+            new_label.append(log["label"])
+
+    new_sentence, _ = run_labels(new_label)
 
 
     result = {
@@ -704,13 +707,12 @@ def bksp_delete(data):
     "completed_count": 1,  # 필요시 원본 값 사용
     "logs": [
         {
-            "target": sentence,
+            "target": new_sentence,
             "logs": list(new_logs)  # deque였다면 list로 변환
             }
         ]
     }
     return result
-
 
 '''with open("data/origin/tap_logs_target1_20250912_113613.json", 'r', encoding='utf-8') as f:
     data = json.load(f)
